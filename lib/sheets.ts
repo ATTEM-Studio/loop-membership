@@ -1,5 +1,4 @@
-import {sheets} from '@googleapis/sheets'
-import {JWT} from 'google-auth-library'
+import {google} from 'googleapis'
 import {Customer, Source} from './domain'
 
 const headers=['id','phone','source','visits','points','lastVisit']
@@ -8,8 +7,8 @@ function client(){
   const email=process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL
   const key=process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g,'\n')
   if(!email||!key||!process.env.GOOGLE_SHEET_ID) return null
-  const auth=new JWT({email,key,scopes:['https://www.googleapis.com/auth/spreadsheets']})
-  return sheets({version:'v4',auth})
+  const auth=new google.auth.JWT({email,key,scopes:['https://www.googleapis.com/auth/spreadsheets']})
+  return google.sheets({version:'v4',auth})
 }
 
 export async function readCustomers():Promise<Customer[]>{
