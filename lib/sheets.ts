@@ -28,3 +28,8 @@ export async function replaceCustomers(customers:Customer[]){
   await sheets.spreadsheets.values.clear({spreadsheetId:process.env.GOOGLE_SHEET_ID!,range:'Customers!A2:F'})
   if(customers.length) await sheets.spreadsheets.values.update({spreadsheetId:process.env.GOOGLE_SHEET_ID!,range:'Customers!A2:F',valueInputOption:'RAW',requestBody:{values:customers.map(c=>[c.id,c.phone,c.source??'',c.visits,c.points,c.lastVisit])}})
 }
+
+export async function appendVisit(phone:string, source:Source|undefined, points:number){
+  const sheets=client(); if(!sheets) throw new Error('GOOGLE_SHEETS_NOT_CONFIGURED')
+  await sheets.spreadsheets.values.append({spreadsheetId:process.env.GOOGLE_SHEET_ID!,range:'Visits!A:D',valueInputOption:'RAW',requestBody:{values:[[new Date().toISOString().slice(0,10),phone,source??'',points]]}})
+}
