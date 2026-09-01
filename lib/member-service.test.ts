@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest'
 import {PRIVACY_CONSENT_VERSION, type Customer, type Reward} from './domain'
-import {ADMIN_PIN, earnPoint, isAdminPin, redeemReward} from './member-service'
+import {ADMIN_PIN, acceptPrivacyConsent, earnPoint, isAdminPin, redeemReward} from './member-service'
 
 const currentCustomer:Customer = {
   id:'1', phone:'01012345678', source:'네이버', visits:3, points:12, lastVisit:'2026-08-31',
@@ -13,6 +13,16 @@ describe('admin pin', () => {
     expect(ADMIN_PIN).toBe('9999')
     expect(isAdminPin('9999')).toBe(true)
     expect(isAdminPin('1234')).toBe(false)
+  })
+})
+
+describe('privacy consent', () => {
+  it('updates consent without changing points or visits', () => {
+    const stale:Customer={...currentCustomer,privacyConsentAt:undefined,privacyConsentVersion:undefined}
+    const result=acceptPrivacyConsent([stale],stale.phone,'2026-09-01T00:00:00.000Z')
+    expect(result.customer).toMatchObject({
+      points:12,visits:3,privacyConsentAt:'2026-09-01T00:00:00.000Z',privacyConsentVersion:PRIVACY_CONSENT_VERSION,
+    })
   })
 })
 
