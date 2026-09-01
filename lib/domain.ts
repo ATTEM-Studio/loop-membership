@@ -1,4 +1,5 @@
 export type Source = '네이버'|'인스타'|'카카오'|'당근'|'구글'|'지나가다가'
+
 export type Customer = {
   id:string
   phone:string
@@ -8,6 +9,23 @@ export type Customer = {
   lastVisit:string
   privacyConsentAt?:string
   privacyConsentVersion?:string
+}
+
+export type Reward = {
+  id:string
+  name:string
+  points:number
+  enabled:boolean
+}
+
+export type PointTransaction = {
+  date:string
+  phone:string
+  type:'EARN'|'REDEEM'
+  delta:number
+  balanceBefore:number
+  balanceAfter:number
+  description:string
 }
 
 export const PRIVACY_CONSENT_VERSION = '2026-09-01-v1'
