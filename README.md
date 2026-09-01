@@ -1,6 +1,19 @@
-# LOOP MVP
+# LOOP Membership
 
-매장 태블릿용 고객 멤버십과 유입경로 CRM의 시연용 MVP입니다.
+매장 태블릿에서 전화번호 기반 멤버십 포인트를 적립·사용하고, 관리자가 유입경로와 포인트 혜택을 관리하는 Next.js 앱입니다.
+
+## 주요 기능
+
+- 방문 1회당 기본 1P 적립
+- 기존 고객 포인트 조회 후 `적립` / `사용` 선택
+- 관리자가 혜택명과 필요 포인트를 직접 설정
+- 포인트 사용 시 직원 관리자 PIN 확인
+- 적립/사용 거래 이력 기록
+- 신규·재동의 대상 고객의 개인정보 수집·이용 동의 기록
+- 미가입 전화번호는 동의 전 저장하지 않음
+- 관리자 전체 고객 목록은 마스킹된 전화번호만 브라우저에 전달
+- 관리자에서 개인정보 삭제 요청 처리 시 Customers, Visits, Transactions 관련 기록 함께 삭제
+- 빠른 연속 탭 중복 요청 방지
 
 ## 실행
 
@@ -9,15 +22,90 @@ npm install
 npm run dev
 ```
 
-고객 화면에서 전화번호를 입력하고, 신규 고객이면 유입경로를 선택합니다. 관리자 보기에서 적립·재방문·유입경로 데이터를 확인할 수 있습니다. 현재 데이터 저장소는 브라우저 `localStorage`이며, 다음 단계에서 `Repository` 인터페이스를 기준으로 Google Sheets API Route를 연결하면 됩니다.
+## 환경변수
 
-## Google Sheets 연결 준비
+`.env.example`을 참고합니다.
 
-`.env.example`을 `.env.local`로 복사하고 서비스 계정 이메일, private key, sheet id를 입력합니다. UI와 도메인 로직은 저장소 구현과 분리되어 있어 Google Sheets 연결 시 화면 변경을 최소화할 수 있습니다.
+```env
+GOOGLE_SERVICE_ACCOUNT_EMAIL=
+GOOGLE_PRIVATE_KEY=
+GOOGLE_SHEET_ID=
+LOOP_ADMIN_PIN=9999
+```
 
-## Google Sheets 설정
+`LOOP_ADMIN_PIN`의 기본값은 요청된 `9999`입니다. 운영 시에는 코드 수정 없이 Vercel 환경변수에서 변경할 수 있습니다.
 
-1. Google Cloud에서 Sheets API를 활성화하고 서비스 계정을 만듭니다.
-2. Google Sheet에 `Customers` 시트를 만들고 서비스 계정 이메일을 편집자로 공유합니다.
-3. Vercel 환경변수에 `GOOGLE_SERVICE_ACCOUNT_EMAIL`, `GOOGLE_PRIVATE_KEY`, `GOOGLE_SHEET_ID`를 등록합니다.
-4. `GET /api/members`로 연결 상태를 확인하고, `POST /api/members`에 `{ "phone": "01012345678", "source": "인스타" }`를 보내 적립을 테스트합니다.
+## Google Sheets 구성
+
+서비스 계정을 Google Sheet의 편집자로 공유하고 아래 시트를 사용합니다. 없는 시트는 앱이 자동으로 생성합니다.
+
+### Customers
+
+| 열 | 값 |
+|---|---|
+| A | id |
+| B | phone |
+| C | source |
+| D | visits |
+| E | points |
+| F | lastVisit |
+| G | privacyConsentAt |
+| H | privacyConsentVersion |
+
+### Visits
+
+`date | phone | source | points`
+
+기존 방문 분석과의 호환을 위해 유지합니다.
+
+### Transactions
+
+`date | phone | type | delta | balanceBefore | balanceAfter | description`
+
+`EARN`과 `REDEEM`을 모두 기록해 포인트 잔액 변화 원인을 추적할 수 있습니다.
+
+### Settings
+
+`id | name | points | enabled`
+
+관리자 화면에서 저장한 포인트 혜택이 기록됩니다. 설정이 비어 있으면 기본 혜택으로 `10P 아메리카노 1잔`, `20P 3,000원 할인`을 보여줍니다.
+
+## 고객 흐름
+
+1. 전화번호 입력
+2. 기존 가입 여부 조회
+3. 신규 고객 또는 현재 동의 버전이 없는 고객만 개인정보 수집·이용 동의
+4. 신규 고객은 최초 1회 유입경로 선택
+5. 기존 고객은 포인트 적립 또는 사용 선택
+6. 포인트 사용 시 혜택 선택 후 직원 PIN 확인
+7. 완료 후 약 12초 뒤 자동으로 다음 고객 화면으로 복귀
+
+## 관리자 흐름
+
+상단 `관리자 보기`를 누르면 4자리 PIN을 요구합니다. 인증 후에만 고객 통계와 포인트 혜택 설정을 조회할 수 있습니다. 고객 전화번호는 관리자 브라우저에도 전체 값을 내려주지 않고 마스킹 형태로만 표시합니다.
+
+고객의 개인정보 삭제·동의 철회 요청을 처리할 때 관리자 고객 목록의 삭제 버튼을 사용하면 앱이 보유한 Customers, Visits, Transactions의 해당 전화번호 기록을 함께 제거합니다.
+
+## 개인정보 운영 주의
+
+현재 동의 화면에는 다음 항목을 구분해 표시합니다.
+
+- 수집·이용 목적
+- 수집 항목
+- 보유·이용 기간
+- 동의 거부 권리와 서비스 이용 제한 가능성
+- 만 14세 미만 고객의 법정대리인 동의 안내
+- 개인정보 삭제·동의 철회 요청 경로
+
+필수 동의 체크박스는 사전 선택하지 않습니다. 동의 문안 버전은 `2026-09-01-v1`로 기록되어 문안 변경 시 재동의를 받을 수 있습니다.
+
+이 구현은 개인정보 보호 리스크를 줄이기 위한 제품 기능이며, 실제 매장 운영 전에는 사업자명·개인정보 보호 책임자/연락처·처리위탁·제3자 제공 여부·파기 절차 등 해당 사업장의 전체 개인정보 처리방침을 별도로 확정하고 공개해야 합니다. 개별 법률 자문을 대체하지 않습니다.
+
+## 검증
+
+```bash
+npm test
+npm run build
+```
+
+기능 브랜치의 GitHub Actions CI에서도 테스트와 프로덕션 빌드를 실행합니다.
