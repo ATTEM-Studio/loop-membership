@@ -9,7 +9,7 @@ import {
   redeemPoints,
 } from './domain'
 
-export const ADMIN_PIN = '9999'
+export const ADMIN_PIN = process.env.LOOP_ADMIN_PIN?.trim() || '9999'
 
 export function isAdminPin(pin:string){return pin===ADMIN_PIN}
 
