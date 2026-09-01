@@ -27,10 +27,28 @@ type MemberResult = {
   transaction:PointTransaction
 }
 
+type ConsentResult = {
+  customers:Customer[]
+  customer:Customer
+}
+
 function replaceCustomer(customers:Customer[],customer:Customer){
   return customers.some(item=>item.id===customer.id)
     ?customers.map(item=>item.id===customer.id?customer:item)
     :[...customers,customer]
+}
+
+export function acceptPrivacyConsent(customers:Customer[],phoneValue:string,now:string):ConsentResult{
+  const phone=normalizePhone(phoneValue)
+  if(phone.length<10) throw new Error('INVALID_PHONE')
+  const found=customers.find(customer=>customer.phone===phone)
+  if(!found) throw new Error('CUSTOMER_NOT_FOUND')
+  const customer:Customer={
+    ...found,
+    privacyConsentAt:now,
+    privacyConsentVersion:PRIVACY_CONSENT_VERSION,
+  }
+  return {customers:replaceCustomer(customers,customer),customer}
 }
 
 export function earnPoint(customers:Customer[],input:EarnInput):MemberResult{
