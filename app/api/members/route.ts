@@ -22,9 +22,11 @@ function errorStatus(message:string){
   return 500
 }
 
-export async function GET(){
-  try{return NextResponse.json({customers:await readCustomers(),storage:'google-sheets'})}
-  catch(error){
+export async function GET(request:Request){
+  try{
+    if(!isAdminPin(request.headers.get('x-admin-pin')??'')) throw new Error('INVALID_PIN')
+    return NextResponse.json({customers:await readCustomers(),storage:'google-sheets'})
+  }catch(error){
     const message=error instanceof Error?error.message:'UNKNOWN_ERROR'
     return NextResponse.json({error:message,storage:'google-sheets'},{status:errorStatus(message)})
   }
@@ -40,6 +42,7 @@ export async function POST(request:Request){
     const customers=await readCustomers()
 
     if(action==='lookup'){
+      // Lookup never persists an unknown number. New customers are only stored after explicit consent.
       const customer=customers.find(item=>item.phone===phone)??null
       return NextResponse.json({customer,storage:'google-sheets'})
     }
