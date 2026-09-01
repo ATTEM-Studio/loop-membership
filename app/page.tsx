@@ -67,7 +67,8 @@ function CustomerDetailModal({customer,pin,onClose,onCustomerChange}:{customer:A
  useEffect(()=>{
   let active=true
   setLoading(true);setError('');setDetail(null);setTargetPoints(String(customer.points))
-  parseResponse(fetch('/api/members',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'detail',customerId:customer.id,pin})}))
+  fetch('/api/members',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'detail',customerId:customer.id,pin})})
+   .then(parseResponse)
    .then(data=>{if(!active)return;const next={customer:data.customer as AdminCustomer,transactions:(data.transactions??[]) as AdminTransaction[]};setDetail(next);setTargetPoints(String(next.customer.points))})
    .catch(e=>active&&setError(errorMessage(e instanceof Error?e.message:'REQUEST_FAILED')))
    .finally(()=>active&&setLoading(false))
