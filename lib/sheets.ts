@@ -107,6 +107,29 @@ export async function saveRewards(rewards:Reward[]){
   if(rewards.length) await sheets.spreadsheets.values.update({spreadsheetId,range:'Settings!A2:D',valueInputOption:'RAW',requestBody:{values:rewards.map(rewardToRow)}})
 }
 
+async function purgePhoneRows(sheets:sheets_v4.Sheets,title:string,headers:string[],range:string,phone:string){
+  await ensureSheet(sheets,title,headers)
+  const spreadsheetId=process.env.GOOGLE_SHEET_ID!
+  const result=await sheets.spreadsheets.values.get({spreadsheetId,range})
+  const rows=result.data.values??[]
+  const filtered=rows.slice(1).filter(row=>String(row[1]??'')!==phone)
+  const width=headers.length
+  const end=String.fromCharCode(64+width)
+  await sheets.spreadsheets.values.clear({spreadsheetId,range:`${title}!A2:${end}`})
+  if(filtered.length) await sheets.spreadsheets.values.update({spreadsheetId,range:`${title}!A2:${end}`,valueInputOption:'RAW',requestBody:{values:filtered}})
+}
+
+export async function deleteCustomerData(customerId:string){
+  const customers=await readCustomers()
+  const found=customers.find(customer=>customer.id===customerId)
+  if(!found) throw new Error('CUSTOMER_NOT_FOUND')
+  await replaceCustomers(customers.filter(customer=>customer.id!==customerId))
+  const sheets=requiredClient()
+  await purgePhoneRows(sheets,'Visits',visitHeaders,'Visits!A:D',found.phone)
+  await purgePhoneRows(sheets,'Transactions',transactionHeaders,'Transactions!A:G',found.phone)
+  return {id:customerId}
+}
+
 // Backward-compatible visit log retained for existing sheets and analytics.
 export async function appendVisit(phone:string, source:Source|undefined, points:number){
   const sheets=requiredClient(); await ensureSheet(sheets,'Visits',visitHeaders)
