@@ -5,6 +5,7 @@ on:
     branches:
       - main
       - feature/points-redemption-privacy
+      - feature/admin-customer-points-modal
   pull_request:
 
 jobs:

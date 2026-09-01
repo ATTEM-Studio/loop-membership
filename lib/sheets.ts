@@ -57,6 +57,17 @@ export function rewardFromRow(row:unknown[]):Reward{
 
 export function rewardToRow(reward:Reward){return [reward.id,reward.name,reward.points,reward.enabled]}
 export function transactionToRow(t:PointTransaction){return [t.date,t.phone,t.type,t.delta,t.balanceBefore,t.balanceAfter,t.description]}
+export function transactionFromRow(row:unknown[]):PointTransaction{
+  return {
+    date:String(row[0]??''),
+    phone:String(row[1]??''),
+    type:String(row[2]??'EARN') as PointTransaction['type'],
+    delta:Number(row[3]??0),
+    balanceBefore:Number(row[4]??0),
+    balanceAfter:Number(row[5]??0),
+    description:String(row[6]??''),
+  }
+}
 
 async function ensureSheet(sheets:sheets_v4.Sheets,title:string,headers:string[]){
   const spreadsheetId=process.env.GOOGLE_SHEET_ID!
@@ -91,6 +102,16 @@ export async function replaceCustomers(customers:Customer[]){
 export async function appendTransaction(transaction:PointTransaction){
   const sheets=requiredClient(); await ensureSheet(sheets,'Transactions',transactionHeaders)
   await sheets.spreadsheets.values.append({spreadsheetId:process.env.GOOGLE_SHEET_ID!,range:'Transactions!A:G',valueInputOption:'RAW',insertDataOption:'INSERT_ROWS',requestBody:{values:[transactionToRow(transaction)]}})
+}
+
+export async function readTransactionsForPhone(phone:string):Promise<PointTransaction[]>{
+  const sheets=requiredClient(); await ensureSheet(sheets,'Transactions',transactionHeaders)
+  const result=await sheets.spreadsheets.values.get({spreadsheetId:process.env.GOOGLE_SHEET_ID!,range:'Transactions!A:G'})
+  return (result.data.values??[])
+    .slice(1)
+    .filter(row=>String(row[1]??'')===phone)
+    .map(transactionFromRow)
+    .reverse()
 }
 
 export async function readRewards():Promise<Reward[]>{

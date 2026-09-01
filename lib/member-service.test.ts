@@ -1,6 +1,6 @@
 import {describe, expect, it} from 'vitest'
 import {PRIVACY_CONSENT_VERSION, type Customer, type Reward} from './domain'
-import {ADMIN_PIN, acceptPrivacyConsent, earnPoint, isAdminPin, redeemReward} from './member-service'
+import {ADMIN_PIN, acceptPrivacyConsent, adjustCustomerPoints, earnPoint, isAdminPin, redeemReward} from './member-service'
 
 const currentCustomer:Customer = {
   id:'1', phone:'01012345678', source:'네이버', visits:3, points:12, lastVisit:'2026-08-31',
@@ -61,5 +61,30 @@ describe('redeemReward', () => {
 
   it('rejects rewards that cost more than the current balance', () => {
     expect(() => redeemReward([{...currentCustomer,points:5}], currentCustomer.phone, reward, '2026-09-01T00:00:00.000Z')).toThrow('INSUFFICIENT_POINTS')
+  })
+})
+
+describe('adjustCustomerPoints', () => {
+  it('records a positive ADJUST transaction when target balance is higher', () => {
+    const result=adjustCustomerPoints([currentCustomer],currentCustomer.id,15,'2026-09-01T12:00:00.000Z')
+    expect(result.customer.points).toBe(15)
+    expect(result.transaction).toMatchObject({
+      type:'ADJUST',delta:3,balanceBefore:12,balanceAfter:15,description:'관리자 포인트 조정'
+    })
+  })
+
+  it('records a negative ADJUST transaction when target balance is lower', () => {
+    const result=adjustCustomerPoints([currentCustomer],currentCustomer.id,7,'2026-09-01T12:00:00.000Z')
+    expect(result.customer.points).toBe(7)
+    expect(result.transaction).toMatchObject({type:'ADJUST',delta:-5,balanceBefore:12,balanceAfter:7})
+  })
+
+  it('rejects invalid target balances', () => {
+    expect(()=>adjustCustomerPoints([currentCustomer],currentCustomer.id,-1,'2026-09-01T12:00:00.000Z')).toThrow('INVALID_POINTS')
+    expect(()=>adjustCustomerPoints([currentCustomer],currentCustomer.id,1.5,'2026-09-01T12:00:00.000Z')).toThrow('INVALID_POINTS')
+  })
+
+  it('rejects unchanged balances', () => {
+    expect(()=>adjustCustomerPoints([currentCustomer],currentCustomer.id,12,'2026-09-01T12:00:00.000Z')).toThrow('POINTS_UNCHANGED')
   })
 })

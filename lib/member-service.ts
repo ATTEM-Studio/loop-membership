@@ -106,6 +106,25 @@ export function redeemReward(customers:Customer[],phoneValue:string,reward:Rewar
   return {customers:replaceCustomer(customers,customer),customer,transaction}
 }
 
+export function adjustCustomerPoints(customers:Customer[],customerId:string,targetPoints:number,now:string):MemberResult{
+  if(!Number.isInteger(targetPoints)||targetPoints<0) throw new Error('INVALID_POINTS')
+  const found=customers.find(customer=>customer.id===customerId)
+  if(!found) throw new Error('CUSTOMER_NOT_FOUND')
+  const delta=targetPoints-found.points
+  if(delta===0) throw new Error('POINTS_UNCHANGED')
+  const customer:Customer={...found,points:targetPoints}
+  const transaction:PointTransaction={
+    date:now,
+    phone:found.phone,
+    type:'ADJUST',
+    delta,
+    balanceBefore:found.points,
+    balanceAfter:targetPoints,
+    description:'관리자 포인트 조정',
+  }
+  return {customers:replaceCustomer(customers,customer),customer,transaction}
+}
+
 export function sanitizeRewards(input:unknown):Reward[]{
   if(!Array.isArray(input)) throw new Error('INVALID_REWARDS')
   const rewards=input.map((value,index)=>{

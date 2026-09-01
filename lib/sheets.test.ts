@@ -4,6 +4,7 @@ import {
   customerToRow,
   rewardFromRow,
   rewardToRow,
+  transactionFromRow,
   transactionToRow,
 } from './sheets'
 import type {PointTransaction, Reward} from './domain'
@@ -38,5 +39,14 @@ describe('transaction rows', () => {
     expect(transactionToRow(transaction)).toEqual([
       '2026-09-01T01:02:03.000Z','01012345678','REDEEM',-10,12,2,'아메리카노 1잔'
     ])
+  })
+
+  it('parses ADJUST transaction rows', () => {
+    expect(transactionFromRow([
+      '2026-09-01T12:00:00.000Z','01012345678','ADJUST','3','12','15','관리자 포인트 조정'
+    ])).toEqual({
+      date:'2026-09-01T12:00:00.000Z',phone:'01012345678',type:'ADJUST',delta:3,
+      balanceBefore:12,balanceAfter:15,description:'관리자 포인트 조정'
+    })
   })
 })

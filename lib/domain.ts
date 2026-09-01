@@ -21,7 +21,7 @@ export type Reward = {
 export type PointTransaction = {
   date:string
   phone:string
-  type:'EARN'|'REDEEM'
+  type:'EARN'|'REDEEM'|'ADJUST'
   delta:number
   balanceBefore:number
   balanceAfter:number
