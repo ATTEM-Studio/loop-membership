@@ -12,7 +12,11 @@ export type ImportPlan={
   blockingIssues:string[]
 }
 
+type BalanceTarget='visitPoints'|'stamps'|'paymentPoints'
+type PendingAdjustment={phone:string;target:BalanceTarget;before:number;after:number;kind:'existing'}
+
 const balanceDescription=(importId:string)=>`기존 시스템 DB 이전 · ${importId}`
+const reconciliationDescription=(importId:string)=>`기존 시스템 DB 이전 잔액 맞춤 · ${importId}`
 const historyDescription=(description:string|undefined,importId:string)=>`${description?.trim()||'기존 시스템 과거 이력'} · ${importId}`
 
 function importedField<K extends keyof NormalizedImportCustomer>(row:NormalizedImportCustomer|undefined,key:K){return row?.[key]}
@@ -38,28 +42,50 @@ function groupCustomers(rows:NormalizedImportCustomer[]){
   return byPhone
 }
 
-function addVisitPointAdjustment(target:ImportPlan,phone:string,before:number,after:number,now:string,importId:string){
+function addVisitPointAdjustment(target:ImportPlan,phone:string,before:number,after:number,now:string,description:string){
   if(before===after)return
-  const delta=after-before,description=balanceDescription(importId)
+  const delta=after-before
   const transaction:PointTransaction={date:now,phone,type:'ADJUST',delta,balanceBefore:before,balanceAfter:after,description}
   const ledger:BalanceLedgerEntry={date:now,phone,delta,balanceBefore:before,balanceAfter:after,description}
   target.transactions.push(transaction);target.pointLedger.push(ledger)
 }
 
-function addBalanceAdjustment(target:BalanceLedgerEntry[],phone:string,before:number,after:number,now:string,importId:string){
+function addBalanceAdjustment(target:BalanceLedgerEntry[],phone:string,before:number,after:number,now:string,description:string){
   if(before===after)return
-  target.push({date:now,phone,delta:after-before,balanceBefore:before,balanceAfter:after,description:balanceDescription(importId)})
+  target.push({date:now,phone,delta:after-before,balanceBefore:before,balanceAfter:after,description})
 }
 
-function addPaymentAdjustment(target:PaymentLedgerEntry[],phone:string,before:number,after:number,now:string,importId:string){
+function addPaymentAdjustment(target:PaymentLedgerEntry[],phone:string,before:number,after:number,now:string,description:string){
   if(before===after)return
-  target.push({date:now,phone,paymentAmount:0,rate:0,delta:after-before,balanceBefore:before,balanceAfter:after,description:balanceDescription(importId)})
+  target.push({date:now,phone,paymentAmount:0,rate:0,delta:after-before,balanceBefore:before,balanceAfter:after,description})
+}
+
+function customerBalance(customer:Customer,target:BalanceTarget){
+  return target==='visitPoints'?customer.points:target==='stamps'?(customer.stamps??0):(customer.paymentPoints??0)
+}
+
+function setCustomerBalance(customer:Customer,target:BalanceTarget,value:number){
+  if(target==='visitPoints')customer.points=value
+  else if(target==='stamps')customer.stamps=value
+  else customer.paymentPoints=value
+}
+
+function importedBalance(imported:NormalizedImportCustomer,target:BalanceTarget){
+  return target==='visitPoints'?imported.visitPoints:target==='stamps'?imported.stamps:imported.paymentPoints
+}
+
+function addTargetAdjustment(plan:ImportPlan,target:BalanceTarget,phone:string,before:number,after:number,now:string,description:string){
+  if(target==='visitPoints')addVisitPointAdjustment(plan,phone,before,after,now,description)
+  else if(target==='stamps')addBalanceAdjustment(plan.stampLedger,phone,before,after,now,description)
+  else addPaymentAdjustment(plan.paymentLedger,phone,before,after,now,description)
 }
 
 export function planImport(currentCustomers:Customer[],payload:NormalizedImportPayload,resolutions:DuplicateResolution[],now:string,importId:string):ImportPlan{
   const importedByPhone=groupCustomers(payload.customers)
   const resolutionByPhone=new Map(resolutions.map(item=>[item.phone,item]))
   const currentByPhone=new Map(currentCustomers.map(customer=>[customer.phone,customer]))
+  const pendingExistingAdjustments:PendingAdjustment[]=[]
+  const newPhones=new Set<string>()
   const plan:ImportPlan={
     customers:currentCustomers.map(customer=>({...customer,stamps:customer.stamps??0,paymentPoints:customer.paymentPoints??0})),
     visits:[],transactions:[],pointLedger:[],stampLedger:[],paymentLedger:[],
@@ -81,10 +107,8 @@ export function planImport(currentCustomers:Customer[],payload:NormalizedImportP
         privacyConsentAt:undefined,privacyConsentVersion:undefined,
       }
       replaceCustomer(customer)
+      newPhones.add(phone)
       plan.summary.newCustomers++
-      addVisitPointAdjustment(plan,phone,0,customer.points,now,importId)
-      addBalanceAdjustment(plan.stampLedger,phone,0,customer.stamps??0,now,importId)
-      addPaymentAdjustment(plan.paymentLedger,phone,0,customer.paymentPoints??0,now,importId)
       continue
     }
 
@@ -101,9 +125,11 @@ export function planImport(currentCustomers:Customer[],payload:NormalizedImportP
     if(choice(resolution,'lastVisit')==='imported')next.lastVisit=provided(importedField(imported,'lastVisit'),next.lastVisit)
     if(choice(resolution,'source')==='imported')next.source=provided(importedField(imported,'source'),next.source)
     replaceCustomer(next)
-    addVisitPointAdjustment(plan,phone,existing.points,next.points,now,importId)
-    addBalanceAdjustment(plan.stampLedger,phone,existing.stamps??0,next.stamps??0,now,importId)
-    addPaymentAdjustment(plan.paymentLedger,phone,existing.paymentPoints??0,next.paymentPoints??0,now,importId)
+
+    for(const target of ['visitPoints','stamps','paymentPoints'] as const){
+      const before=customerBalance(existing,target),after=customerBalance(next,target)
+      if(before!==after)pendingExistingAdjustments.push({phone,target,before,after,kind:'existing'})
+    }
   }
 
   for(const importedVisit of payload.visits){
@@ -128,6 +154,31 @@ export function planImport(currentCustomers:Customer[],payload:NormalizedImportP
     }else{
       plan.paymentLedger.push({date:entry.date,phone:entry.phone,paymentAmount:0,rate:0,delta:entry.delta,balanceBefore:before,balanceAfter:after,description})
     }
+  }
+
+  // New customers: detailed history is authoritative. Summary balances only reconcile the final difference.
+  for(const phone of newPhones){
+    const customer=plan.customers.find(item=>item.phone===phone)
+    const imported=importedByPhone.get(phone)
+    if(!customer||!imported)continue
+    for(const target of ['visitPoints','stamps','paymentPoints'] as const){
+      const key=`${phone}:${target}`
+      const hasHistory=historyBalances.has(key)
+      const historyBalance=historyBalances.get(key)??0
+      const summaryBalance=importedBalance(imported,target)
+      if(summaryBalance===undefined){
+        if(hasHistory)setCustomerBalance(customer,target,historyBalance)
+        continue
+      }
+      setCustomerBalance(customer,target,summaryBalance)
+      const description=hasHistory?reconciliationDescription(importId):balanceDescription(importId)
+      addTargetAdjustment(plan,target,phone,hasHistory?historyBalance:0,summaryBalance,now,description)
+    }
+  }
+
+  // Existing customers: preserve the live LOOP before/after audit trail, but append it after imported historical rows.
+  for(const adjustment of pendingExistingAdjustments){
+    addTargetAdjustment(plan,adjustment.target,adjustment.phone,adjustment.before,adjustment.after,now,balanceDescription(importId))
   }
 
   // If an imported customer has no summary visit count, real historical visits are the only trustworthy count.
