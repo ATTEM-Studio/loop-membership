@@ -55,6 +55,23 @@ export const SHEET_LAYOUT:readonly SheetSpec[]=[
   {key:'earningSettings',title:'설정_적립방식',legacyTitle:'EarningSettings',group:'settings',headers:earningSettingsHeaders,tabColor:GROUP_COLORS.settings},
 ]
 
+const DASHBOARD_TITLES=new Set(['대시보드','대쉬보드','Dashboard','dashboard'])
+
+export function sheetLayoutIndexes(properties:readonly {sheetId?:number|null;title?:string|null}[]){
+  const placements:{sheetId:number;index:number}[]=[]
+  const dashboard=properties.find(sheet=>sheet.title&&DASHBOARD_TITLES.has(sheet.title))
+  const hasDashboard=dashboard?.sheetId!==undefined&&dashboard.sheetId!==null
+  if(hasDashboard) placements.push({sheetId:dashboard.sheetId as number,index:0})
+
+  const startIndex=hasDashboard?1:0
+  SHEET_LAYOUT.forEach((spec,index)=>{
+    const sheet=properties.find(properties=>properties.title===spec.title)
+    if(sheet?.sheetId===undefined||sheet.sheetId===null) return
+    placements.push({sheetId:sheet.sheetId,index:startIndex+index})
+  })
+  return placements
+}
+
 const SHEET_BY_KEY=Object.fromEntries(SHEET_LAYOUT.map(spec=>[spec.key,spec])) as Record<SheetKey,SheetSpec>
 let workbookLayoutPromise:Promise<void>|null=null
 
@@ -205,16 +222,18 @@ async function prepareWorkbookLayout(sheets:sheets_v4.Sheets){
   }
 
   const layoutRequests:sheets_v4.Schema$Request[]=[]
-  SHEET_LAYOUT.forEach((spec,index)=>{
-    const sheet=properties.find(properties=>properties.title===spec.title)
-    if(sheet?.sheetId===undefined||sheet.sheetId===null) return
+  for(const placement of sheetLayoutIndexes(properties)){
+    const sheet=properties.find(properties=>properties.sheetId===placement.sheetId)
+    const spec=SHEET_LAYOUT.find(spec=>spec.title===sheet?.title)
     layoutRequests.push({
       updateSheetProperties:{
-        properties:{sheetId:sheet.sheetId,index,tabColorStyle:{rgbColor:spec.tabColor}},
-        fields:'index,tabColorStyle',
+        properties:spec
+          ?{sheetId:placement.sheetId,index:placement.index,tabColorStyle:{rgbColor:spec.tabColor}}
+          :{sheetId:placement.sheetId,index:placement.index},
+        fields:spec?'index,tabColorStyle':'index',
       },
     })
-  })
+  }
   if(layoutRequests.length) await sheets.spreadsheets.batchUpdate({spreadsheetId,requestBody:{requests:layoutRequests}})
 
   await sheets.spreadsheets.values.batchUpdate({
