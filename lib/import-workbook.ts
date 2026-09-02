@@ -21,7 +21,7 @@ function nonEmptyCell(value:unknown){return String(value??'').trim()!==''}
 function nonEmptyRow(row:unknown[]){return row.some(nonEmptyCell)}
 
 function headerScore(row:unknown[]){
-  return row.reduce((score,value)=>{
+  return row.reduce<number>((score,value)=>{
     const header=String(value??'').trim()
     if(!header)return score
     const recognized=['customers','visits','points'].some(role=>Boolean(inferColumnTarget(header,role as ImportSheetRole)))
