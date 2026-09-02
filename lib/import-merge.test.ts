@@ -116,4 +116,18 @@ describe('summary and point-history reconciliation',()=>{
     ])
     expect(plan.customers[0].points).toBe(8)
   })
+
+  it('derives the current balance from detailed history when no summary balance exists',()=>{
+    const phone='01055556666'
+    const input=payload({
+      customers:[{sheetName:'회원목록',rowNumber:2,phone}],
+      pointHistory:[
+        {sheetName:'적립내역',rowNumber:2,phone,date:'2026-08-01',delta:5,target:'visitPoints'},
+        {sheetName:'적립내역',rowNumber:3,phone,date:'2026-08-20',delta:-2,target:'visitPoints'},
+      ],
+    })
+    const plan=planImport([],input,[],'2026-09-02T04:00:00.000Z','imp-123')
+    expect(plan.customers[0].points).toBe(3)
+    expect(plan.pointLedger.map(item=>item.balanceAfter)).toEqual([5,3])
+  })
 })
