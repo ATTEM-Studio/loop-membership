@@ -84,3 +84,36 @@ describe('new imported customers and history',()=>{
     expect(plan.visits.map(item=>item.date)).toEqual(['2026-08-10','2026-08-20'])
   })
 })
+
+describe('summary and point-history reconciliation',()=>{
+  it('does not create a full baseline adjustment when imported history already reaches the summary balance',()=>{
+    const phone='01055556666'
+    const input=payload({
+      customers:[{sheetName:'회원목록',rowNumber:2,phone,visitPoints:8}],
+      pointHistory:[
+        {sheetName:'적립내역',rowNumber:2,phone,date:'2026-08-01',delta:5,target:'visitPoints'},
+        {sheetName:'적립내역',rowNumber:3,phone,date:'2026-08-20',delta:3,target:'visitPoints'},
+      ],
+    })
+    const plan=planImport([],input,[],'2026-09-02T04:00:00.000Z','imp-123')
+    expect(plan.pointLedger.map(item=>[item.delta,item.balanceBefore,item.balanceAfter])).toEqual([[5,0,5],[3,5,8]])
+    expect(plan.transactions).toHaveLength(2)
+    expect(plan.pointLedger.some(item=>item.date==='2026-09-02T04:00:00.000Z'&&item.delta===8)).toBe(false)
+  })
+
+  it('adds only the reconciliation difference when history and summary balance differ',()=>{
+    const phone='01055556666'
+    const input=payload({
+      customers:[{sheetName:'회원목록',rowNumber:2,phone,visitPoints:8}],
+      pointHistory:[
+        {sheetName:'적립내역',rowNumber:2,phone,date:'2026-08-01',delta:5,target:'visitPoints'},
+      ],
+    })
+    const plan=planImport([],input,[],'2026-09-02T04:00:00.000Z','imp-123')
+    expect(plan.pointLedger).toEqual([
+      expect.objectContaining({date:'2026-08-01',delta:5,balanceBefore:0,balanceAfter:5}),
+      expect.objectContaining({date:'2026-09-02T04:00:00.000Z',delta:3,balanceBefore:5,balanceAfter:8,description:expect.stringContaining('잔액 맞춤')}),
+    ])
+    expect(plan.customers[0].points).toBe(8)
+  })
+})
