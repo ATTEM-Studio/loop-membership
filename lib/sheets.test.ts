@@ -1,7 +1,6 @@
 import {describe, expect, it} from 'vitest'
 import * as sheetModule from './sheets'
 import {
-  IMPORT_METADATA_KEY,
   SHEET_LAYOUT,
   balanceLedgerFromRow,
   balanceLedgerToRow,
@@ -9,8 +8,6 @@ import {
   customerToRow,
   earningSettingsFromRow,
   earningSettingsToRow,
-  importMetadataRequest,
-  importRowsForPlan,
   paymentLedgerFromRow,
   paymentLedgerToRow,
   returnReasonFromRow,
@@ -20,6 +17,7 @@ import {
   transactionFromRow,
   transactionToRow,
 } from './sheets'
+import {IMPORT_METADATA_KEY,importMetadataRequest,importRowsForPlan} from './import-sheets'
 import type {BalanceLedgerEntry, EarningSettings, PaymentLedgerEntry, PointTransaction, ReturnReasonEntry, Reward} from './domain'
 import type {ImportPlan} from './import-merge'
 
@@ -83,7 +81,7 @@ describe('legacy import persistence layout',()=>{
   it('stores duplicate-import fingerprints as spreadsheet developer metadata',()=>{
     expect(IMPORT_METADATA_KEY).toBe('LOOP_IMPORT_HASH')
     expect(importMetadataRequest('sha256-value')).toEqual({
-      createDeveloperMetadata:{developerMetadata:{metadataKey:'LOOP_IMPORT_HASH',metadataValue:'sha256-value',visibility:'DOCUMENT'}},
+      createDeveloperMetadata:{developerMetadata:{metadataKey:'LOOP_IMPORT_HASH',metadataValue:'sha256-value',location:{spreadsheet:true},visibility:'DOCUMENT'}},
     })
   })
 })
