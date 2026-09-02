@@ -17,7 +17,9 @@ import {
   transactionFromRow,
   transactionToRow,
 } from './sheets'
+import {IMPORT_METADATA_KEY,importMetadataRequest,importRowsForPlan} from './import-sheets'
 import type {BalanceLedgerEntry, EarningSettings, PaymentLedgerEntry, PointTransaction, ReturnReasonEntry, Reward} from './domain'
+import type {ImportPlan} from './import-merge'
 
 describe('managed Google Sheet layout', () => {
   it('groups customer, point history, and settings tabs with Korean names', () => {
@@ -55,6 +57,32 @@ describe('managed Google Sheet layout', () => {
       {sheetId:7,index:1},
       {sheetId:8,index:2},
     ])
+  })
+})
+
+describe('legacy import persistence layout',()=>{
+  const plan:ImportPlan={
+    customers:[{id:'1',phone:'01012345678',visits:3,points:8,stamps:2,paymentPoints:500,lastVisit:'2026-08-20'}],
+    visits:[{date:'2026-08-20',phone:'01012345678',points:0}],
+    transactions:[{date:'2026-09-02T00:00:00.000Z',phone:'01012345678',type:'ADJUST',delta:8,balanceBefore:0,balanceAfter:8,description:'기존 시스템 DB 이전'}],
+    pointLedger:[{date:'2026-09-02T00:00:00.000Z',phone:'01012345678',delta:8,balanceBefore:0,balanceAfter:8,description:'기존 시스템 DB 이전'}],
+    stampLedger:[{date:'2026-09-02T00:00:00.000Z',phone:'01012345678',delta:2,balanceBefore:0,balanceAfter:2,description:'기존 시스템 DB 이전'}],
+    paymentLedger:[{date:'2026-09-02T00:00:00.000Z',phone:'01012345678',paymentAmount:0,rate:0,delta:500,balanceBefore:0,balanceAfter:500,description:'기존 시스템 DB 이전'}],
+    summary:{analyzedRows:1,newCustomers:1,duplicateCustomers:0,excludedRows:0,errorRows:0,visits:1,visitPoints:8,stamps:2,paymentPoints:500},blockingIssues:[],
+  }
+
+  it('writes imports only to existing customer and point tabs',()=>{
+    expect(importRowsForPlan(plan).map(item=>item.key)).toEqual([
+      'customers','visits','transactions','pointLedger','stampLedger','paymentLedger',
+    ])
+    expect(SHEET_LAYOUT).toHaveLength(10)
+  })
+
+  it('stores duplicate-import fingerprints as spreadsheet developer metadata',()=>{
+    expect(IMPORT_METADATA_KEY).toBe('LOOP_IMPORT_HASH')
+    expect(importMetadataRequest('sha256-value')).toEqual({
+      createDeveloperMetadata:{developerMetadata:{metadataKey:'LOOP_IMPORT_HASH',metadataValue:'sha256-value',location:{spreadsheet:true},visibility:'DOCUMENT'}},
+    })
   })
 })
 
