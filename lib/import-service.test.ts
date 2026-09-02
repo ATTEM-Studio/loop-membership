@@ -55,4 +55,11 @@ describe('normalized import fingerprint',()=>{
     expect(a).toBe(b)
     expect(a).toMatch(/^[a-f0-9]{64}$/)
   })
+
+  it('does not change when the same normalized data is renamed or has a different source file hash',()=>{
+    const resolutions:DuplicateResolution[]=[{phone:'01012345678',strategy:'use-imported'}]
+    const a=stableImportHash({...payload,sourceFileHash:'aaa'},resolutions)
+    const b=stableImportHash({...payload,fileName:'renamed-copy.xlsx',sourceFileHash:'bbb'},resolutions)
+    expect(a).toBe(b)
+  })
 })
