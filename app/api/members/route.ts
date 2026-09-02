@@ -26,6 +26,7 @@ import {
   readTransactionsForPhone,
   replaceCustomers,
 } from '../../../lib/sheets'
+import {getTenantContext} from '../../../lib/tenant-request'
 
 type Action='lookup'|'consent'|'earn'|'redeem'|'redeemStamp'|'returnReason'|'delete'|'detail'|'adjust'
 type MemberRequest={
@@ -89,7 +90,8 @@ function adminTransaction(transaction:PointTransaction){
 export async function GET(request:Request){
   try{
     if(!isAdminPin(request.headers.get('x-admin-pin')??'')) throw new Error('INVALID_PIN')
-    const customers=await readCustomers()
+    const context=getTenantContext(request)
+    const customers=await readCustomers(context)
     return NextResponse.json({customers:customers.map(adminCustomer),storage:'google-sheets'})
   }catch(error){
     const message=error instanceof Error?error.message:'UNKNOWN_ERROR'
@@ -100,24 +102,25 @@ export async function GET(request:Request){
 export async function POST(request:Request){
   try{
     const body=await request.json() as MemberRequest
+    const context=getTenantContext(request)
     const action=body.action??'earn'
 
     if(action==='delete'){
       if(!isAdminPin(body.pin??'')) throw new Error('INVALID_PIN')
       if(!body.customerId) throw new Error('CUSTOMER_NOT_FOUND')
-      const deleted=await deleteCustomerData(body.customerId)
+      const deleted=await deleteCustomerData(body.customerId,context)
       return NextResponse.json({deleted,storage:'google-sheets'})
     }
 
     if(action==='detail'||action==='adjust'){
       if(!isAdminPin(body.pin??'')) throw new Error('INVALID_PIN')
       if(!body.customerId) throw new Error('CUSTOMER_NOT_FOUND')
-      const adminCustomers=await readCustomers()
+      const adminCustomers=await readCustomers(context)
       const found=adminCustomers.find(customer=>customer.id===body.customerId)
       if(!found) throw new Error('CUSTOMER_NOT_FOUND')
 
       if(action==='detail'){
-        const transactions=await readTransactionsForPhone(found.phone)
+        const transactions=await readTransactionsForPhone(found.phone,context)
         return NextResponse.json({
           customer:adminCustomer(found),
           transactions:transactions.map(adminTransaction),
@@ -126,10 +129,10 @@ export async function POST(request:Request){
       }
 
       const result=adjustCustomerPoints(adminCustomers,found.id,Number(body.targetPoints),new Date().toISOString())
-      await replaceCustomers(result.customers)
-      await appendTransaction(result.transaction)
-      await appendPointLedger(result.ledger)
-      const transactions=await readTransactionsForPhone(found.phone)
+      await replaceCustomers(result.customers,context)
+      await appendTransaction(result.transaction,context)
+      await appendPointLedger(result.ledger,context)
+      const transactions=await readTransactionsForPhone(found.phone,context)
       return NextResponse.json({
         customer:adminCustomer(result.customer),
         transaction:adminTransaction(result.transaction),
@@ -140,7 +143,7 @@ export async function POST(request:Request){
 
     const phone=normalizePhone(body.phone??'')
     if(phone.length<10) throw new Error('INVALID_PHONE')
-    const customers=await readCustomers()
+    const customers=await readCustomers(context)
 
     if(action==='lookup'){
       const customer=customers.find(item=>item.phone===phone)??null
@@ -150,11 +153,11 @@ export async function POST(request:Request){
     if(action==='consent'){
       if(body.consent!==true) throw new Error('CONSENT_REQUIRED')
       const result=acceptPrivacyConsent(customers,phone,new Date().toISOString())
-      await replaceCustomers(result.customers)
+      await replaceCustomers(result.customers,context)
       return NextResponse.json({customer:kioskCustomer(result.customer),storage:'google-sheets'})
     }
 
-    const earningSettings=await readEarningSettings()
+    const earningSettings=await readEarningSettings(context)
 
     if(action==='returnReason'){
       const found=customers.find(customer=>customer.phone===phone)
@@ -168,36 +171,36 @@ export async function POST(request:Request){
         visitNumber:found.visits+1,
         reasonId:reason.id,
         reasonLabel:reason.label,
-      })
+      },context)
       return NextResponse.json({thanks:reason.thanks,storage:'google-sheets'})
     }
 
     if(action==='redeemStamp'){
       if(!isAdminPin(body.pin??'')) throw new Error('INVALID_PIN')
-      const latestCustomers=await readCustomers()
+      const latestCustomers=await readCustomers(context)
       const result=redeemStampCoupon(latestCustomers,phone,earningSettings.stampGoal,earningSettings.stampRewardName,new Date().toISOString())
-      await replaceCustomers(result.customers)
-      await appendStampLedger(result.ledger)
+      await replaceCustomers(result.customers,context)
+      await appendStampLedger(result.ledger,context)
       return NextResponse.json({customer:kioskCustomer(result.customer),rewardName:earningSettings.stampRewardName,storage:'google-sheets'})
     }
 
     if(action==='redeem'){
       if(!isAdminPin(body.pin??'')) throw new Error('INVALID_PIN')
       if(earningSettings.mode==='stamp') throw new Error('STAMP_REDEMPTION_REQUIRED')
-      const rewards=earningSettings.mode==='payment'?await readPaymentRewards():await readRewards()
+      const rewards=earningSettings.mode==='payment'?await readPaymentRewards(context):await readRewards(context)
       const reward=rewards.find(item=>item.id===body.rewardId&&item.enabled)
       if(!reward) throw new Error('REWARD_NOT_FOUND')
-      const latestCustomers=await readCustomers()
+      const latestCustomers=await readCustomers(context)
       if(earningSettings.mode==='payment'){
         const result=redeemPaymentReward(latestCustomers,phone,reward,new Date().toISOString())
-        await replaceCustomers(result.customers)
-        await appendPaymentLedger(result.ledger)
+        await replaceCustomers(result.customers,context)
+        await appendPaymentLedger(result.ledger,context)
         return NextResponse.json({customer:kioskCustomer(result.customer),reward,mode:earningSettings.mode,storage:'google-sheets'})
       }
       const result=redeemReward(latestCustomers,phone,reward,new Date().toISOString())
-      await replaceCustomers(result.customers)
-      await appendTransaction(result.transaction)
-      await appendPointLedger(result.ledger)
+      await replaceCustomers(result.customers,context)
+      await appendTransaction(result.transaction,context)
+      await appendPointLedger(result.ledger,context)
       return NextResponse.json({customer:kioskCustomer(result.customer),reward,mode:earningSettings.mode,storage:'google-sheets'})
     }
 
@@ -205,24 +208,24 @@ export async function POST(request:Request){
     const input={phone,source:body.source,consent:body.consent===true,now}
     if(earningSettings.mode==='stamp'){
       const result=earnStamp(customers,input)
-      await replaceCustomers(result.customers)
-      await appendStampLedger(result.ledger)
-      await appendVisit(phone,result.customer.source,0)
+      await replaceCustomers(result.customers,context)
+      await appendStampLedger(result.ledger,context)
+      await appendVisit(phone,result.customer.source,0,context)
       return NextResponse.json({customer:kioskCustomer(result.customer),mode:earningSettings.mode,storage:'google-sheets'})
     }
     if(earningSettings.mode==='payment'){
       const result=earnPaymentPoints(customers,{...input,paymentAmount:Number(body.paymentAmount),rate:earningSettings.paymentRate})
-      await replaceCustomers(result.customers)
-      await appendPaymentLedger(result.ledger)
-      await appendVisit(phone,result.customer.source,0)
+      await replaceCustomers(result.customers,context)
+      await appendPaymentLedger(result.ledger,context)
+      await appendVisit(phone,result.customer.source,0,context)
       return NextResponse.json({customer:kioskCustomer(result.customer),earned:result.ledger.delta,mode:earningSettings.mode,storage:'google-sheets'})
     }
 
     const result=earnPoint(customers,input)
-    await replaceCustomers(result.customers)
-    await appendTransaction(result.transaction)
-    await appendPointLedger(result.ledger)
-    await appendVisit(phone,result.customer.source,1)
+    await replaceCustomers(result.customers,context)
+    await appendTransaction(result.transaction,context)
+    await appendPointLedger(result.ledger,context)
+    await appendVisit(phone,result.customer.source,1,context)
     return NextResponse.json({customer:kioskCustomer(result.customer),mode:earningSettings.mode,storage:'google-sheets'})
   }catch(error){
     const message=error instanceof Error?error.message:'UNKNOWN_ERROR'

@@ -9,6 +9,7 @@ import {
   savePaymentRewards,
   saveRewards,
 } from '../../../lib/sheets'
+import {getTenantContext} from '../../../lib/tenant-request'
 
 function errorStatus(message:string){
   if(message==='GOOGLE_SHEETS_NOT_CONFIGURED') return 503
@@ -18,10 +19,11 @@ function errorStatus(message:string){
   return 500
 }
 
-export async function GET(){
+export async function GET(request:Request){
   try{
+    const context=getTenantContext(request)
     const [rewards,paymentRewards,earningSettings]=await Promise.all([
-      readRewards(),readPaymentRewards(),readEarningSettings(),
+      readRewards(context),readPaymentRewards(context),readEarningSettings(context),
     ])
     return NextResponse.json({rewards,paymentRewards,earningSettings,storage:'google-sheets'})
   }catch(error){
@@ -32,6 +34,7 @@ export async function GET(){
 
 export async function PUT(request:Request){
   try{
+    const context=getTenantContext(request)
     const body=await request.json() as {
       pin?:string
       rewards?:unknown
@@ -42,7 +45,7 @@ export async function PUT(request:Request){
     if(!isAdminPin(body.pin??'')) throw new Error('INVALID_PIN')
 
     const [currentRewards,currentPaymentRewards,currentEarningSettings,customers]=await Promise.all([
-      readRewards(),readPaymentRewards(),readEarningSettings(),readCustomers(),
+      readRewards(context),readPaymentRewards(context),readEarningSettings(context),readCustomers(context),
     ])
     const rewards=body.rewards===undefined?currentRewards:sanitizeRewards(body.rewards)
     const paymentRewards=body.paymentRewards===undefined?currentPaymentRewards:sanitizeRewards(body.paymentRewards)
@@ -53,9 +56,9 @@ export async function PUT(request:Request){
     }
 
     await Promise.all([
-      saveRewards(rewards),
-      savePaymentRewards(paymentRewards),
-      saveEarningSettings(earningSettings),
+      saveRewards(rewards,context),
+      savePaymentRewards(paymentRewards,context),
+      saveEarningSettings(earningSettings,context),
     ])
     return NextResponse.json({rewards,paymentRewards,earningSettings,storage:'google-sheets'})
   }catch(error){

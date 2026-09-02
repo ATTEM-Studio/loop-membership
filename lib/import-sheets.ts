@@ -2,6 +2,7 @@ import {google,type sheets_v4} from 'googleapis'
 import type {ImportPlan} from './import-merge'
 import {
   SHEET_LAYOUT,
+  type SheetContext,
   balanceLedgerToRow,
   customerToRow,
   ensureHeaders,
@@ -34,23 +35,24 @@ export function importRowsForPlan(plan:ImportPlan){
 
 type ImportRowKey=ReturnType<typeof importRowsForPlan>[number]['key']
 
-function client(){
+function client(context?:SheetContext){
   const email=process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL
   const key=process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g,'\n')
-  if(!email||!key||!process.env.GOOGLE_SHEET_ID)return null
+  if(!email||!key||!(context?.spreadsheetId||process.env.GOOGLE_SHEET_ID))return null
   const auth=new google.auth.JWT({email,key,scopes:['https://www.googleapis.com/auth/spreadsheets']})
   return google.sheets({version:'v4',auth})
 }
 
-function requiredClient(){const sheets=client();if(!sheets)throw new Error('GOOGLE_SHEETS_NOT_CONFIGURED');return sheets}
+function requiredClient(context?:SheetContext){const sheets=client(context);if(!sheets)throw new Error('GOOGLE_SHEETS_NOT_CONFIGURED');return sheets}
+function spreadsheetId(context?:SheetContext){const id=context?.spreadsheetId?.trim()||process.env.GOOGLE_SHEET_ID?.trim();if(!id)throw new Error('GOOGLE_SHEETS_NOT_CONFIGURED');return id}
 
 const specByKey=Object.fromEntries(SHEET_LAYOUT.map(spec=>[spec.key,spec])) as Record<string,(typeof SHEET_LAYOUT)[number]>
 const columnByKey:Record<ImportRowKey,string>={customers:'J',visits:'D',transactions:'G',pointLedger:'F',stampLedger:'F',paymentLedger:'H'}
 
-export async function hasImportPayloadHash(hash:string){
-  const sheets=requiredClient()
+export async function hasImportPayloadHash(hash:string,context?:SheetContext){
+  const sheets=requiredClient(context)
   const response=await sheets.spreadsheets.developerMetadata.search({
-    spreadsheetId:process.env.GOOGLE_SHEET_ID!,
+    spreadsheetId:spreadsheetId(context),
     requestBody:{dataFilters:[{developerMetadataLookup:{metadataKey:IMPORT_METADATA_KEY,metadataValue:hash,locationType:'SPREADSHEET'}}]},
   })
   return Boolean(response.data.matchedDeveloperMetadata?.length)
@@ -68,42 +70,42 @@ function missingRows(existing:unknown[][],wanted:unknown[][]){
   return missing
 }
 
-async function currentRowsForKey(key:Exclude<ImportRowKey,'customers'>){
-  if(key==='visits')return (await readVisits()).map(visit=>[visit.date,visit.phone,visit.source??'',visit.points])
-  if(key==='transactions')return (await readTransactions()).map(transactionToRow)
-  if(key==='pointLedger')return (await readPointLedger()).map(balanceLedgerToRow)
-  if(key==='stampLedger')return (await readStampLedger()).map(balanceLedgerToRow)
-  return (await readPaymentLedger()).map(paymentLedgerToRow)
+async function currentRowsForKey(key:Exclude<ImportRowKey,'customers'>,context?:SheetContext){
+  if(key==='visits')return (await readVisits(context)).map(visit=>[visit.date,visit.phone,visit.source??'',visit.points])
+  if(key==='transactions')return (await readTransactions(context)).map(transactionToRow)
+  if(key==='pointLedger')return (await readPointLedger(context)).map(balanceLedgerToRow)
+  if(key==='stampLedger')return (await readStampLedger(context)).map(balanceLedgerToRow)
+  return (await readPaymentLedger(context)).map(paymentLedgerToRow)
 }
 
-async function appendRows(sheets:sheets_v4.Sheets,key:Exclude<ImportRowKey,'customers'>,rows:unknown[][]){
+async function appendRows(sheets:sheets_v4.Sheets,key:Exclude<ImportRowKey,'customers'>,rows:unknown[][],context?:SheetContext){
   if(!rows.length)return
   const spec=specByKey[key]
   await sheets.spreadsheets.values.append({
-    spreadsheetId:process.env.GOOGLE_SHEET_ID!,range:`${spec.title}!A:${columnByKey[key]}`,
+    spreadsheetId:spreadsheetId(context),range:`${spec.title}!A:${columnByKey[key]}`,
     valueInputOption:'RAW',insertDataOption:'INSERT_ROWS',requestBody:{values:rows},
   })
 }
 
-export async function applyImportPlan(plan:ImportPlan,hash:string,importId:string){
-  if(await hasImportPayloadHash(hash))throw new Error('IMPORT_ALREADY_APPLIED')
+export async function applyImportPlan(plan:ImportPlan,hash:string,importId:string,context?:SheetContext){
+  if(await hasImportPayloadHash(hash,context))throw new Error('IMPORT_ALREADY_APPLIED')
   if(plan.blockingIssues.length)throw new Error('IMPORT_HAS_BLOCKING_ISSUES')
-  await ensureHeaders()
-  const sheets=requiredClient()
+  await ensureHeaders(context)
+  const sheets=requiredClient(context)
   const rowsByKey=importRowsForPlan(plan)
 
   // Histories are appended before the customer snapshot. Retries filter exact rows; generated
   // point rows include importId in their description, while visit rows use multiset matching.
   for(const item of rowsByKey){
     if(item.key==='customers')continue
-    const existing=await currentRowsForKey(item.key)
-    await appendRows(sheets,item.key,missingRows(existing,item.rows))
+    const existing=await currentRowsForKey(item.key,context)
+    await appendRows(sheets,item.key,missingRows(existing,item.rows),context)
   }
 
   // The customer list is a target snapshot, so rerunning a partially completed import is idempotent.
-  await replaceCustomers(plan.customers)
+  await replaceCustomers(plan.customers,context)
   await sheets.spreadsheets.batchUpdate({
-    spreadsheetId:process.env.GOOGLE_SHEET_ID!,requestBody:{requests:[importMetadataRequest(hash)]},
+    spreadsheetId:spreadsheetId(context),requestBody:{requests:[importMetadataRequest(hash)]},
   })
   return {importId,summary:plan.summary}
 }

@@ -14,6 +14,7 @@ import {
   type Reward,
   type Source,
 } from '../lib/domain'
+import {getDeviceId,loadDeviceSession,saveDeviceSession,tenantHeaders,type DeviceSession} from '../lib/device-client'
 
 const FALLBACK_REWARDS:Reward[]=[
   {id:'coffee',name:'아메리카노 1잔',points:10,enabled:true},
@@ -59,6 +60,8 @@ function errorMessage(code:string){
   if(code==='STAMP_NOT_COMPLETE')return '아직 도장 쿠폰이 완성되지 않았습니다.'
   if(code==='PAYMENT_MODE_EXIT_CONFIRM_REQUIRED')return '결제 포인트 보존 안내를 확인해주세요.'
   if(code==='INVALID_EARNING_SETTINGS')return '적립 방식 설정값을 다시 확인해주세요.'
+  if(code==='INVALID_TENANT_TOKEN')return '매장 연결이 만료되었거나 올바르지 않습니다. 매장을 다시 연결해주세요.'
+  if(code==='TENANT_AUTH_NOT_CONFIGURED')return '매장 연결 설정이 완료되지 않았습니다.'
   return '처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.'
 }
 
@@ -77,6 +80,26 @@ function modeBalance(customer:KioskCustomer|AdminCustomer,mode:EarningMode){
 }
 function modeUnit(mode:EarningMode){return mode==='stamp'?'개':'P'}
 function money(value:number){return new Intl.NumberFormat('ko-KR').format(value)}
+
+function StoreConnection({onConnected}:{onConnected:(session:DeviceSession)=>void}){
+  const [spreadsheetId,setSpreadsheetId]=useState('')
+  const [connectionCode,setConnectionCode]=useState('')
+  const [busy,setBusy]=useState(false)
+  const [error,setError]=useState('')
+  const connect=async()=>{
+    if(!spreadsheetId.trim()||!connectionCode.trim()){setError('구글시트 주소와 매장 연결코드를 입력해주세요.');return}
+    setBusy(true);setError('')
+    try{
+      const data=await parseResponse(await fetch('/api/device/activate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spreadsheetId,connectionCode,deviceId:getDeviceId()})}))
+      const session={token:String(data.token),storeName:String(data.storeName??''),appName:String(data.appName??data.storeName??'LOOP')}
+      saveDeviceSession(session);onConnected(session)
+    }catch(e){
+      const code=e instanceof Error?e.message:'REQUEST_FAILED'
+      setError(code==='INVALID_CONNECTION_CODE'?'매장 연결코드가 올바르지 않습니다.':code==='SHEET_ACCESS_DENIED'?'구글시트 공유 권한을 확인해주세요.':'매장 연결에 실패했습니다. 구글시트 주소와 코드를 확인해주세요.')
+    }finally{setBusy(false)}
+  }
+  return <div className="connection-page"><div className="connection-card"><div className="connection-mark">L</div><span className="step">LOOP 매장 연결</span><h1>이 태블릿에서 사용할 매장을 연결해주세요.</h1><p>처음 한 번만 입력하면 이후에는 별도 로그인 없이 계속 사용할 수 있습니다.</p><label><span>구글시트 주소 또는 시트 ID</span><input autoFocus value={spreadsheetId} onChange={e=>setSpreadsheetId(e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/..." autoComplete="off"/></label><label><span>매장 연결코드</span><input value={connectionCode} onChange={e=>setConnectionCode(e.target.value)} onKeyDown={e=>e.key==='Enter'&&void connect()} placeholder="예: LOOP-CAFE-4821" autoComplete="off"/></label><button className="primary" disabled={busy} onClick={()=>void connect()}>{busy?'매장 확인 중...':'매장 연결하기'} <ArrowRight size={17}/></button>{error&&<div className="form-error">{error}</div>}<div className="connection-help">연결코드는 매장 관리자에게 문의해주세요.</div></div></div>
+}
 
 function StampCoupon({count,goal,rewardName,animate=false}:{count:number;goal:number;rewardName:string;animate?:boolean}){
   const completed=count>=goal
@@ -126,7 +149,7 @@ function Kiosk({rewards,paymentRewards,settings}:{rewards:Reward[];paymentReward
     setSelectedReward(null);setPin('');setPaymentAmount('');setBusy(false);setError('');setCompleted(null);setReturnThanks('');lock.current=false
   }
   useEffect(()=>{if(step!=='done')return;const timer=window.setTimeout(reset,12000);return()=>window.clearTimeout(timer)},[step])
-  const request=async(payload:Record<string,unknown>)=>parseResponse(await fetch('/api/members',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}))
+  const request=async(payload:Record<string,unknown>)=>parseResponse(await fetch('/api/members',{method:'POST',headers:tenantHeaders({'Content-Type':'application/json'}),body:JSON.stringify(payload)}))
   const run=async(task:()=>Promise<void>)=>{
     if(lock.current)return
     lock.current=true;setBusy(true);setError('')
@@ -317,7 +340,7 @@ function CustomerDetailModal({customer,pin,onClose,onCustomerChange}:{customer:A
   useEffect(()=>{
     let active=true
     setLoading(true);setError('');setDetail(null);setTargetPoints(String(customer.points))
-    fetch('/api/members',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'detail',customerId:customer.id,pin})})
+    fetch('/api/members',{method:'POST',headers:tenantHeaders({'Content-Type':'application/json'}),body:JSON.stringify({action:'detail',customerId:customer.id,pin})})
       .then(parseResponse)
       .then(data=>{if(!active)return;const next={customer:data.customer as AdminCustomer,transactions:(data.transactions??[]) as AdminTransaction[]};setDetail(next);setTargetPoints(String(next.customer.points))})
       .catch(e=>active&&setError(errorMessage(e instanceof Error?e.message:'REQUEST_FAILED')))
@@ -331,7 +354,7 @@ function CustomerDetailModal({customer,pin,onClose,onCustomerChange}:{customer:A
     if(!detail||!valid||delta===0)return
     setSaving(true);setError('')
     try{
-      const data=await parseResponse(await fetch('/api/members',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'adjust',customerId:detail.customer.id,targetPoints:target,pin})}))
+      const data=await parseResponse(await fetch('/api/members',{method:'POST',headers:tenantHeaders({'Content-Type':'application/json'}),body:JSON.stringify({action:'adjust',customerId:detail.customer.id,targetPoints:target,pin})}))
       const next={customer:data.customer as AdminCustomer,transactions:(data.transactions??[]) as AdminTransaction[]}
       setDetail(next);setTargetPoints(String(next.customer.points));onCustomerChange(next.customer)
     }catch(e){setError(errorMessage(e instanceof Error?e.message:'REQUEST_FAILED'))}finally{setSaving(false)}
@@ -451,7 +474,7 @@ function Dashboard({customers,bundle,pin,onBundleSaved,onCustomersChange}:{custo
     if(settings.returnReasons.some(reason=>!reason.label.trim()||!reason.thanks.trim())||settings.returnReasons.length>6){setStatus('재방문 설문은 1~6개의 문항과 감사 문구를 모두 입력해주세요.');return}
     setSaving(true);setStatus('')
     try{
-      const data=await parseResponse(await fetch('/api/settings',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin,rewards:visitRewards,paymentRewards,earningSettings:settings,confirmPaymentModeExit})}))
+      const data=await parseResponse(await fetch('/api/settings',{method:'PUT',headers:tenantHeaders({'Content-Type':'application/json'}),body:JSON.stringify({pin,rewards:visitRewards,paymentRewards,earningSettings:settings,confirmPaymentModeExit})}))
       const next={rewards:data.rewards as Reward[],paymentRewards:data.paymentRewards as Reward[],earningSettings:data.earningSettings as EarningSettings}
       onBundleSaved(next);setStatus('적립 방식과 혜택 설정을 저장했습니다.');setShowPaymentWarning(false);setAnalytics(null)
     }catch(e){
@@ -469,7 +492,7 @@ function Dashboard({customers,bundle,pin,onBundleSaved,onCustomersChange}:{custo
     if(!window.confirm(`${customer.phoneMasked} 고객의 멤버십 정보와 모든 적립 기록을 삭제할까요?\n삭제 후 복구할 수 없습니다.`))return
     setStatus('')
     try{
-      await parseResponse(await fetch('/api/members',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'delete',customerId:customer.id,pin})}))
+      await parseResponse(await fetch('/api/members',{method:'POST',headers:tenantHeaders({'Content-Type':'application/json'}),body:JSON.stringify({action:'delete',customerId:customer.id,pin})}))
       onCustomersChange(customers.filter(item=>item.id!==customer.id));if(selectedCustomer?.id===customer.id)setSelectedCustomer(null);setStatus('고객 개인정보와 관련 기록을 삭제했습니다.');setAnalytics(null)
     }catch(e){setStatus(errorMessage(e instanceof Error?e.message:'REQUEST_FAILED'))}
   }
@@ -479,7 +502,7 @@ function Dashboard({customers,bundle,pin,onBundleSaved,onCustomersChange}:{custo
     setAnalyticsKey(key)
     if(analytics)return
     setAnalyticsLoading(true)
-    try{const data=await parseResponse(await fetch('/api/analytics',{headers:{'x-admin-pin':pin},cache:'no-store'}));setAnalytics(data.analytics as AnalyticsBundle)}catch(e){setStatus(errorMessage(e instanceof Error?e.message:'REQUEST_FAILED'));setAnalyticsKey(null)}finally{setAnalyticsLoading(false)}
+    try{const data=await parseResponse(await fetch('/api/analytics',{headers:tenantHeaders({'x-admin-pin':pin}),cache:'no-store'}));setAnalytics(data.analytics as AnalyticsBundle)}catch(e){setStatus(errorMessage(e instanceof Error?e.message:'REQUEST_FAILED'));setAnalyticsKey(null)}finally{setAnalyticsLoading(false)}
   }
 
   return <>
@@ -536,13 +559,16 @@ function AdminLogin({open,onClose,onSuccess}:{open:boolean;onClose:()=>void;onSu
   const submit=async()=>{
     if(pin.length!==4){setError('관리자 비밀번호 4자리를 입력해주세요.');return}
     setBusy(true);setError('')
-    try{const data=await parseResponse(await fetch('/api/members',{headers:{'x-admin-pin':pin},cache:'no-store'}));onSuccess(pin,data.customers as AdminCustomer[])}catch(e){setError(errorMessage(e instanceof Error?e.message:'REQUEST_FAILED'));setPin('')}finally{setBusy(false)}
+    try{const data=await parseResponse(await fetch('/api/members',{headers:tenantHeaders({'x-admin-pin':pin}),cache:'no-store'}));onSuccess(pin,data.customers as AdminCustomer[])}catch(e){setError(errorMessage(e instanceof Error?e.message:'REQUEST_FAILED'));setPin('')}finally{setBusy(false)}
   }
   return <div className="modal-backdrop" onMouseDown={e=>e.target===e.currentTarget&&onClose()}><div className="admin-login"><div className="success-icon secure"><LockKeyhole size={30}/></div><h2>관리자 확인</h2><p>고객 정보와 적립 설정을 보호하기 위해 관리자 비밀번호가 필요합니다.</p><input autoFocus className="pin-input" type="password" inputMode="numeric" maxLength={4} value={pin} onChange={e=>setPin(e.target.value.replace(/\D/g,'').slice(0,4))} onKeyDown={e=>e.key==='Enter'&&submit()} placeholder="••••"/><button className="primary" disabled={busy||pin.length!==4} onClick={submit}>{busy?'확인 중...':'관리자 모드 열기'}</button>{error&&<div className="form-error">{error}</div>}<button className="ghost" onClick={onClose}>취소</button></div></div>
 }
 
 export default function Home(){
   const [mode,setMode]=useState<'kiosk'|'dashboard'>('kiosk')
+  const [deviceSession,setDeviceSession]=useState<DeviceSession|null>(null)
+  const [ready,setReady]=useState(false)
+  const [connectRequired,setConnectRequired]=useState(false)
   const [customers,setCustomers]=useState<AdminCustomer[]>([])
   const [bundle,setBundle]=useState<SettingsBundle>({
     rewards:FALLBACK_REWARDS,
@@ -552,14 +578,23 @@ export default function Home(){
   const [adminPin,setAdminPin]=useState('')
   const [adminLogin,setAdminLogin]=useState(false)
   useEffect(()=>{
-    fetch('/api/settings',{cache:'no-store'}).then(parseResponse).then(data=>{
+    const session=loadDeviceSession()
+    setDeviceSession(session)
+    setConnectRequired(!session&&new URLSearchParams(window.location.search).get('loop-connect')==='1')
+    setReady(true)
+  },[])
+  useEffect(()=>{
+    if(!ready||connectRequired)return
+    fetch('/api/settings',{headers:tenantHeaders({},deviceSession?.token),cache:'no-store'}).then(parseResponse).then(data=>{
       setBundle({
         rewards:(data.rewards as Reward[]|undefined)??FALLBACK_REWARDS,
         paymentRewards:(data.paymentRewards as Reward[]|undefined)??FALLBACK_PAYMENT_REWARDS,
         earningSettings:(data.earningSettings as EarningSettings|undefined)??DEFAULT_EARNING_SETTINGS,
       })
     }).catch(()=>{})
-  },[])
+  },[ready,connectRequired,deviceSession?.token])
   const backToKiosk=()=>{setMode('kiosk');setAdminPin('');setCustomers([])}
-  return <div className="shell"><header className="topbar"><div className="brand"><div className="mark">L</div> LOOP</div><div className="switcher"><button className={mode==='kiosk'?'active':''} onClick={backToKiosk}>고객 화면</button><button className={mode==='dashboard'?'active':''} onClick={()=>setAdminLogin(true)}><LockKeyhole size={13}/> 관리자 보기</button></div></header>{mode==='kiosk'?<Kiosk rewards={bundle.rewards} paymentRewards={bundle.paymentRewards} settings={bundle.earningSettings}/>:<Dashboard customers={customers} bundle={bundle} pin={adminPin} onBundleSaved={setBundle} onCustomersChange={setCustomers}/>}<AdminLogin open={adminLogin} onClose={()=>setAdminLogin(false)} onSuccess={(pin,list)=>{setAdminPin(pin);setCustomers(list);setMode('dashboard');setAdminLogin(false)}}/></div>
+  if(!ready)return <div className="connection-page"><div className="connection-card"><div className="connection-mark">L</div><h1>LOOP를 준비하고 있어요.</h1></div></div>
+  if(connectRequired)return <StoreConnection onConnected={session=>{setDeviceSession(session);setConnectRequired(false);window.history.replaceState({},'',window.location.pathname)}}/>
+  return <div className="shell"><header className="topbar"><div className="brand"><div className="mark">L</div> LOOP{deviceSession&&<small className="store-label">· {deviceSession.appName}</small>}</div><div className="switcher"><button className={mode==='kiosk'?'active':''} onClick={backToKiosk}>고객 화면</button><button className={mode==='dashboard'?'active':''} onClick={()=>setAdminLogin(true)}><LockKeyhole size={13}/> 관리자 보기</button></div></header>{mode==='kiosk'?<Kiosk rewards={bundle.rewards} paymentRewards={bundle.paymentRewards} settings={bundle.earningSettings}/>:<Dashboard customers={customers} bundle={bundle} pin={adminPin} onBundleSaved={setBundle} onCustomersChange={setCustomers}/>}<AdminLogin open={adminLogin} onClose={()=>setAdminLogin(false)} onSuccess={(pin,list)=>{setAdminPin(pin);setCustomers(list);setMode('dashboard');setAdminLogin(false)}}/></div>
 }

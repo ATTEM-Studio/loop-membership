@@ -4,6 +4,8 @@ import {
   SHEET_LAYOUT,
   balanceLedgerFromRow,
   balanceLedgerToRow,
+  connectionFromRow,
+  connectionToRow,
   customerFromRow,
   customerToRow,
   earningSettingsFromRow,
@@ -16,6 +18,7 @@ import {
   rewardToRow,
   transactionFromRow,
   transactionToRow,
+  getDefaultSheetContext,
 } from './sheets'
 import {IMPORT_METADATA_KEY,importMetadataRequest,importRowsForPlan} from './import-sheets'
 import type {BalanceLedgerEntry, EarningSettings, PaymentLedgerEntry, PointTransaction, ReturnReasonEntry, Reward} from './domain'
@@ -34,6 +37,7 @@ describe('managed Google Sheet layout', () => {
       ['rewards','설정_방문포인트혜택','Settings','settings'],
       ['paymentRewards','설정_결제포인트혜택','PaymentRewards','settings'],
       ['earningSettings','설정_적립방식','EarningSettings','settings'],
+      ['connection','설정_매장연결','StoreConnection','settings'],
     ])
   })
 
@@ -75,7 +79,7 @@ describe('legacy import persistence layout',()=>{
     expect(importRowsForPlan(plan).map(item=>item.key)).toEqual([
       'customers','visits','transactions','pointLedger','stampLedger','paymentLedger',
     ])
-    expect(SHEET_LAYOUT).toHaveLength(10)
+    expect(SHEET_LAYOUT).toHaveLength(11)
   })
 
   it('stores duplicate-import fingerprints as spreadsheet developer metadata',()=>{
@@ -83,6 +87,20 @@ describe('legacy import persistence layout',()=>{
     expect(importMetadataRequest('sha256-value')).toEqual({
       createDeveloperMetadata:{developerMetadata:{metadataKey:'LOOP_IMPORT_HASH',metadataValue:'sha256-value',location:{spreadsheet:true},visibility:'DOCUMENT'}},
     })
+  })
+})
+
+describe('sheet contexts',()=>{
+  it('uses an explicit spreadsheet context when supplied',()=>{
+    expect(getDefaultSheetContext({spreadsheetId:'tenant-sheet-123'})).toEqual({spreadsheetId:'tenant-sheet-123'})
+  })
+
+  it('keeps the environment spreadsheet as the fallback',()=>{
+    const previous=process.env.GOOGLE_SHEET_ID
+    process.env.GOOGLE_SHEET_ID='fallback-sheet'
+    expect(getDefaultSheetContext()).toEqual({spreadsheetId:'fallback-sheet'})
+    if(previous===undefined)delete process.env.GOOGLE_SHEET_ID
+    else process.env.GOOGLE_SHEET_ID=previous
   })
 })
 
@@ -158,5 +176,12 @@ describe('earning settings row', () => {
       returnReasons:[{id:'menu',label:'메뉴 생각나서',thanks:'또 생각나셨다니 오늘도 맛있게 준비할게요.'}],
     }
     expect(earningSettingsFromRow(earningSettingsToRow(settings))).toEqual(settings)
+  })
+})
+
+describe('store connection rows',()=>{
+  it('round-trips store connection settings',()=>{
+    const connection={storeName:'꿈카페',connectionCode:'LOOP-CAFE-4821',status:'정상',appName:'꿈카페 멤버십'}
+    expect(connectionFromRow(connectionToRow(connection))).toEqual(connection)
   })
 })

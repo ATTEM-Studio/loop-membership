@@ -13,10 +13,11 @@ import {
 } from './domain'
 
 type SheetGroup='customer'|'point'|'settings'
+export type SheetContext={spreadsheetId:string}
 type SheetKey=
   |'customers'|'visits'|'returnReasons'
   |'transactions'|'pointLedger'|'stampLedger'|'paymentLedger'
-  |'rewards'|'paymentRewards'|'earningSettings'
+  |'rewards'|'paymentRewards'|'earningSettings'|'connection'
 
 type SheetSpec={
   key:SheetKey
@@ -35,6 +36,7 @@ const balanceLedgerHeaders=['일시','전화번호','변동량','변동전잔액
 const paymentLedgerHeaders=['일시','전화번호','결제금액','적립률(%)','적립포인트','변동전잔액','변동후잔액','내용']
 const returnReasonHeaders=['날짜','전화번호','방문회차','사유ID','재방문사유']
 const earningSettingsHeaders=['적립방식','결제적립률','도장목표개수','도장완성혜택','업종','재방문설문설정']
+const connectionHeaders=['업체명','연결코드','사용상태','앱표시명']
 
 const GROUP_COLORS:Record<SheetGroup,{red:number;green:number;blue:number}>={
   customer:{red:0.12,green:0.50,blue:0.40},
@@ -53,6 +55,7 @@ export const SHEET_LAYOUT:readonly SheetSpec[]=[
   {key:'rewards',title:'설정_방문포인트혜택',legacyTitle:'Settings',group:'settings',headers:rewardHeaders,tabColor:GROUP_COLORS.settings},
   {key:'paymentRewards',title:'설정_결제포인트혜택',legacyTitle:'PaymentRewards',group:'settings',headers:rewardHeaders,tabColor:GROUP_COLORS.settings},
   {key:'earningSettings',title:'설정_적립방식',legacyTitle:'EarningSettings',group:'settings',headers:earningSettingsHeaders,tabColor:GROUP_COLORS.settings},
+  {key:'connection',title:'설정_매장연결',legacyTitle:'StoreConnection',group:'settings',headers:connectionHeaders,tabColor:GROUP_COLORS.settings},
 ]
 
 const DASHBOARD_TITLES=new Set(['대시보드','대쉬보드','Dashboard','dashboard'])
@@ -73,7 +76,7 @@ export function sheetLayoutIndexes(properties:readonly {sheetId?:number|null;tit
 }
 
 const SHEET_BY_KEY=Object.fromEntries(SHEET_LAYOUT.map(spec=>[spec.key,spec])) as Record<SheetKey,SheetSpec>
-let workbookLayoutPromise:Promise<void>|null=null
+const workbookLayoutPromises=new Map<string,Promise<void>>()
 
 export const DEFAULT_REWARDS:Reward[]=[
   {id:'coffee',name:'아메리카노 1잔',points:10,enabled:true},
@@ -85,18 +88,26 @@ export const DEFAULT_PAYMENT_REWARDS:Reward[]=[
   {id:'payment-3000',name:'3,000원 할인',points:3000,enabled:true},
 ]
 
-function client(){
+export function getDefaultSheetContext(context?:SheetContext):SheetContext{
+  const spreadsheetId=context?.spreadsheetId?.trim()||process.env.GOOGLE_SHEET_ID?.trim()
+  if(!spreadsheetId)throw new Error('GOOGLE_SHEETS_NOT_CONFIGURED')
+  return {spreadsheetId}
+}
+
+function client(context?:SheetContext){
   const email=process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL
   const key=process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g,'\n')
-  if(!email||!key||!process.env.GOOGLE_SHEET_ID) return null
+  if(!email||!key||!context?.spreadsheetId&&!process.env.GOOGLE_SHEET_ID) return null
   const auth=new google.auth.JWT({email,key,scopes:['https://www.googleapis.com/auth/spreadsheets']})
   return google.sheets({version:'v4',auth})
 }
 
-function requiredClient(){
-  const sheets=client(); if(!sheets) throw new Error('GOOGLE_SHEETS_NOT_CONFIGURED')
+function requiredClient(context?:SheetContext){
+  const sheets=client(context); if(!sheets) throw new Error('GOOGLE_SHEETS_NOT_CONFIGURED')
   return sheets
 }
+
+function spreadsheetId(context?:SheetContext){return getDefaultSheetContext(context).spreadsheetId}
 
 function text(value:unknown){const v=String(value??'').trim();return v||undefined}
 function endColumn(width:number){return String.fromCharCode(64+width)}
@@ -193,16 +204,16 @@ export function earningSettingsFromRow(row:unknown[]):EarningSettings{
   }
 }
 
-async function loadSheetProperties(sheets:sheets_v4.Sheets){
-  const result=await sheets.spreadsheets.get({spreadsheetId:process.env.GOOGLE_SHEET_ID!,fields:'sheets.properties'})
+async function loadSheetProperties(sheets:sheets_v4.Sheets,context?:SheetContext){
+  const result=await sheets.spreadsheets.get({spreadsheetId:spreadsheetId(context),fields:'sheets.properties'})
   return (result.data.sheets??[])
     .map(sheet=>sheet.properties)
     .filter((properties):properties is sheets_v4.Schema$SheetProperties=>Boolean(properties))
 }
 
-async function prepareWorkbookLayout(sheets:sheets_v4.Sheets){
-  const spreadsheetId=process.env.GOOGLE_SHEET_ID!
-  let properties=await loadSheetProperties(sheets)
+async function prepareWorkbookLayout(sheets:sheets_v4.Sheets,context?:SheetContext){
+  const id=spreadsheetId(context)
+  let properties=await loadSheetProperties(sheets,context)
   const setupRequests:sheets_v4.Schema$Request[]=[]
 
   for(const spec of SHEET_LAYOUT){
@@ -217,8 +228,8 @@ async function prepareWorkbookLayout(sheets:sheets_v4.Sheets){
   }
 
   if(setupRequests.length){
-    await sheets.spreadsheets.batchUpdate({spreadsheetId,requestBody:{requests:setupRequests}})
-    properties=await loadSheetProperties(sheets)
+    await sheets.spreadsheets.batchUpdate({spreadsheetId:id,requestBody:{requests:setupRequests}})
+    properties=await loadSheetProperties(sheets,context)
   }
 
   const layoutRequests:sheets_v4.Schema$Request[]=[]
@@ -234,10 +245,10 @@ async function prepareWorkbookLayout(sheets:sheets_v4.Sheets){
       },
     })
   }
-  if(layoutRequests.length) await sheets.spreadsheets.batchUpdate({spreadsheetId,requestBody:{requests:layoutRequests}})
+  if(layoutRequests.length) await sheets.spreadsheets.batchUpdate({spreadsheetId:id,requestBody:{requests:layoutRequests}})
 
   await sheets.spreadsheets.values.batchUpdate({
-    spreadsheetId,
+    spreadsheetId:id,
     requestBody:{
       valueInputOption:'RAW',
       data:SHEET_LAYOUT.map(spec=>({
@@ -248,77 +259,80 @@ async function prepareWorkbookLayout(sheets:sheets_v4.Sheets){
   })
 }
 
-async function ensureWorkbookLayout(sheets:sheets_v4.Sheets){
+async function ensureWorkbookLayout(sheets:sheets_v4.Sheets,context?:SheetContext){
+  const id=spreadsheetId(context)
+  let workbookLayoutPromise=workbookLayoutPromises.get(id)
   if(!workbookLayoutPromise){
-    workbookLayoutPromise=prepareWorkbookLayout(sheets).catch(error=>{
-      workbookLayoutPromise=null
+    workbookLayoutPromise=prepareWorkbookLayout(sheets,{spreadsheetId:id}).catch(error=>{
+      workbookLayoutPromises.delete(id)
       throw error
     })
+    workbookLayoutPromises.set(id,workbookLayoutPromise)
   }
   await workbookLayoutPromise
 }
 
-async function ensureSheet(sheets:sheets_v4.Sheets,key:SheetKey){
-  await ensureWorkbookLayout(sheets)
+async function ensureSheet(sheets:sheets_v4.Sheets,key:SheetKey,context?:SheetContext){
+  await ensureWorkbookLayout(sheets,context)
   return SHEET_BY_KEY[key]
 }
 
-export async function ensureHeaders(){
-  const sheets=requiredClient()
-  await ensureWorkbookLayout(sheets)
+export async function ensureHeaders(context?:SheetContext){
+  const sheets=requiredClient(context)
+  await ensureWorkbookLayout(sheets,context)
 }
 
-export async function readCustomers():Promise<Customer[]>{
-  const sheets=requiredClient(); const spec=await ensureSheet(sheets,'customers')
-  const result=await sheets.spreadsheets.values.get({spreadsheetId:process.env.GOOGLE_SHEET_ID!,range:`${spec.title}!A:J`})
+export async function readCustomers(context?:SheetContext):Promise<Customer[]>{
+  const sheets=requiredClient(context); const spec=await ensureSheet(sheets,'customers',context)
+  const result=await sheets.spreadsheets.values.get({spreadsheetId:spreadsheetId(context),range:`${spec.title}!A:J`})
   const rows=result.data.values??[]
   return rows.slice(1).filter(row=>row[0]).map(customerFromRow)
 }
 
-export async function replaceCustomers(customers:Customer[]){
-  const sheets=requiredClient(); const spec=await ensureSheet(sheets,'customers')
-  const spreadsheetId=process.env.GOOGLE_SHEET_ID!
-  await sheets.spreadsheets.values.clear({spreadsheetId,range:`${spec.title}!A2:J`})
-  if(customers.length) await sheets.spreadsheets.values.update({spreadsheetId,range:`${spec.title}!A2:J`,valueInputOption:'RAW',requestBody:{values:customers.map(customerToRow)}})
+export async function replaceCustomers(customers:Customer[],context?:SheetContext){
+  const sheets=requiredClient(context); const spec=await ensureSheet(sheets,'customers',context)
+  const id=spreadsheetId(context)
+  await sheets.spreadsheets.values.clear({spreadsheetId:id,range:`${spec.title}!A2:J`})
+  if(customers.length) await sheets.spreadsheets.values.update({spreadsheetId:id,range:`${spec.title}!A2:J`,valueInputOption:'RAW',requestBody:{values:customers.map(customerToRow)}})
 }
 
-export async function appendTransaction(transaction:PointTransaction){
-  const sheets=requiredClient(); const spec=await ensureSheet(sheets,'transactions')
-  await sheets.spreadsheets.values.append({spreadsheetId:process.env.GOOGLE_SHEET_ID!,range:`${spec.title}!A:G`,valueInputOption:'RAW',insertDataOption:'INSERT_ROWS',requestBody:{values:[transactionToRow(transaction)]}})
+export async function appendTransaction(transaction:PointTransaction,context?:SheetContext){
+  const sheets=requiredClient(context); const spec=await ensureSheet(sheets,'transactions',context)
+  await sheets.spreadsheets.values.append({spreadsheetId:spreadsheetId(context),range:`${spec.title}!A:G`,valueInputOption:'RAW',insertDataOption:'INSERT_ROWS',requestBody:{values:[transactionToRow(transaction)]}})
 }
 
-export async function readTransactions():Promise<PointTransaction[]>{
-  const sheets=requiredClient(); const spec=await ensureSheet(sheets,'transactions')
-  const result=await sheets.spreadsheets.values.get({spreadsheetId:process.env.GOOGLE_SHEET_ID!,range:`${spec.title}!A:G`})
+export async function readTransactions(context?:SheetContext):Promise<PointTransaction[]>{
+  const sheets=requiredClient(context); const spec=await ensureSheet(sheets,'transactions',context)
+  const result=await sheets.spreadsheets.values.get({spreadsheetId:spreadsheetId(context),range:`${spec.title}!A:G`})
   return (result.data.values??[]).slice(1).filter(row=>row[0]).map(transactionFromRow)
 }
 
-export async function readTransactionsForPhone(phone:string):Promise<PointTransaction[]>{
-  return (await readTransactions()).filter(transaction=>transaction.phone===phone).reverse()
+export async function readTransactionsForPhone(phone:string,context?:SheetContext):Promise<PointTransaction[]>{
+  return (await readTransactions(context)).filter(transaction=>transaction.phone===phone).reverse()
 }
 
 type RewardSheetKey='rewards'|'paymentRewards'
-async function readRewardSheet(key:RewardSheetKey,defaults:Reward[]){
-  const sheets=requiredClient(); const spec=await ensureSheet(sheets,key)
-  const result=await sheets.spreadsheets.values.get({spreadsheetId:process.env.GOOGLE_SHEET_ID!,range:`${spec.title}!A:D`})
+async function readRewardSheet(key:RewardSheetKey,defaults:Reward[],context?:SheetContext){
+  const sheets=requiredClient(context); const spec=await ensureSheet(sheets,key,context)
+  const result=await sheets.spreadsheets.values.get({spreadsheetId:spreadsheetId(context),range:`${spec.title}!A:D`})
   const rewards=(result.data.values??[]).slice(1).filter(row=>row[0]).map(rewardFromRow).filter(reward=>reward.id&&reward.name&&reward.points>0)
   return rewards.length?rewards:defaults.map(reward=>({...reward}))
 }
-async function saveRewardSheet(key:RewardSheetKey,rewards:Reward[]){
-  const sheets=requiredClient(); const spec=await ensureSheet(sheets,key)
-  const spreadsheetId=process.env.GOOGLE_SHEET_ID!
-  await sheets.spreadsheets.values.clear({spreadsheetId,range:`${spec.title}!A2:D`})
-  if(rewards.length) await sheets.spreadsheets.values.update({spreadsheetId,range:`${spec.title}!A2:D`,valueInputOption:'RAW',requestBody:{values:rewards.map(rewardToRow)}})
+async function saveRewardSheet(key:RewardSheetKey,rewards:Reward[],context?:SheetContext){
+  const sheets=requiredClient(context); const spec=await ensureSheet(sheets,key,context)
+  const id=spreadsheetId(context)
+  await sheets.spreadsheets.values.clear({spreadsheetId:id,range:`${spec.title}!A2:D`})
+  if(rewards.length) await sheets.spreadsheets.values.update({spreadsheetId:id,range:`${spec.title}!A2:D`,valueInputOption:'RAW',requestBody:{values:rewards.map(rewardToRow)}})
 }
 
-export async function readRewards(){return readRewardSheet('rewards',DEFAULT_REWARDS)}
-export async function saveRewards(rewards:Reward[]){return saveRewardSheet('rewards',rewards)}
-export async function readPaymentRewards(){return readRewardSheet('paymentRewards',DEFAULT_PAYMENT_REWARDS)}
-export async function savePaymentRewards(rewards:Reward[]){return saveRewardSheet('paymentRewards',rewards)}
+export async function readRewards(context?:SheetContext){return readRewardSheet('rewards',DEFAULT_REWARDS,context)}
+export async function saveRewards(rewards:Reward[],context?:SheetContext){return saveRewardSheet('rewards',rewards,context)}
+export async function readPaymentRewards(context?:SheetContext){return readRewardSheet('paymentRewards',DEFAULT_PAYMENT_REWARDS,context)}
+export async function savePaymentRewards(rewards:Reward[],context?:SheetContext){return saveRewardSheet('paymentRewards',rewards,context)}
 
-export async function readEarningSettings():Promise<EarningSettings>{
-  const sheets=requiredClient(); const spec=await ensureSheet(sheets,'earningSettings')
-  const result=await sheets.spreadsheets.values.get({spreadsheetId:process.env.GOOGLE_SHEET_ID!,range:`${spec.title}!A:F`})
+export async function readEarningSettings(context?:SheetContext):Promise<EarningSettings>{
+  const sheets=requiredClient(context); const spec=await ensureSheet(sheets,'earningSettings',context)
+  const result=await sheets.spreadsheets.values.get({spreadsheetId:spreadsheetId(context),range:`${spec.title}!A:F`})
   const row=(result.data.values??[])[1]
   return row?earningSettingsFromRow(row):{
     ...DEFAULT_EARNING_SETTINGS,
@@ -326,83 +340,107 @@ export async function readEarningSettings():Promise<EarningSettings>{
   }
 }
 
-export async function saveEarningSettings(settings:EarningSettings){
-  const sheets=requiredClient(); const spec=await ensureSheet(sheets,'earningSettings')
-  const spreadsheetId=process.env.GOOGLE_SHEET_ID!
-  await sheets.spreadsheets.values.clear({spreadsheetId,range:`${spec.title}!A2:F`})
-  await sheets.spreadsheets.values.update({spreadsheetId,range:`${spec.title}!A2:F`,valueInputOption:'RAW',requestBody:{values:[earningSettingsToRow(settings)]}})
+export async function saveEarningSettings(settings:EarningSettings,context?:SheetContext){
+  const sheets=requiredClient(context); const spec=await ensureSheet(sheets,'earningSettings',context)
+  const id=spreadsheetId(context)
+  await sheets.spreadsheets.values.clear({spreadsheetId:id,range:`${spec.title}!A2:F`})
+  await sheets.spreadsheets.values.update({spreadsheetId:id,range:`${spec.title}!A2:F`,valueInputOption:'RAW',requestBody:{values:[earningSettingsToRow(settings)]}})
 }
 
 type BalanceLedgerKey='pointLedger'|'stampLedger'
-async function appendBalanceLedger(key:BalanceLedgerKey,entry:BalanceLedgerEntry){
-  const sheets=requiredClient(); const spec=await ensureSheet(sheets,key)
-  await sheets.spreadsheets.values.append({spreadsheetId:process.env.GOOGLE_SHEET_ID!,range:`${spec.title}!A:F`,valueInputOption:'RAW',insertDataOption:'INSERT_ROWS',requestBody:{values:[balanceLedgerToRow(entry)]}})
+async function appendBalanceLedger(key:BalanceLedgerKey,entry:BalanceLedgerEntry,context?:SheetContext){
+  const sheets=requiredClient(context); const spec=await ensureSheet(sheets,key,context)
+  await sheets.spreadsheets.values.append({spreadsheetId:spreadsheetId(context),range:`${spec.title}!A:F`,valueInputOption:'RAW',insertDataOption:'INSERT_ROWS',requestBody:{values:[balanceLedgerToRow(entry)]}})
 }
-async function readBalanceLedger(key:BalanceLedgerKey){
-  const sheets=requiredClient(); const spec=await ensureSheet(sheets,key)
-  const result=await sheets.spreadsheets.values.get({spreadsheetId:process.env.GOOGLE_SHEET_ID!,range:`${spec.title}!A:F`})
+async function readBalanceLedger(key:BalanceLedgerKey,context?:SheetContext){
+  const sheets=requiredClient(context); const spec=await ensureSheet(sheets,key,context)
+  const result=await sheets.spreadsheets.values.get({spreadsheetId:spreadsheetId(context),range:`${spec.title}!A:F`})
   return (result.data.values??[]).slice(1).filter(row=>row[0]).map(balanceLedgerFromRow)
 }
 
-export async function appendPointLedger(entry:BalanceLedgerEntry){return appendBalanceLedger('pointLedger',entry)}
-export async function appendStampLedger(entry:BalanceLedgerEntry){return appendBalanceLedger('stampLedger',entry)}
-export async function readPointLedger(){return readBalanceLedger('pointLedger')}
-export async function readStampLedger(){return readBalanceLedger('stampLedger')}
+export async function appendPointLedger(entry:BalanceLedgerEntry,context?:SheetContext){return appendBalanceLedger('pointLedger',entry,context)}
+export async function appendStampLedger(entry:BalanceLedgerEntry,context?:SheetContext){return appendBalanceLedger('stampLedger',entry,context)}
+export async function readPointLedger(context?:SheetContext){return readBalanceLedger('pointLedger',context)}
+export async function readStampLedger(context?:SheetContext){return readBalanceLedger('stampLedger',context)}
 
-export async function appendPaymentLedger(entry:PaymentLedgerEntry){
-  const sheets=requiredClient(); const spec=await ensureSheet(sheets,'paymentLedger')
-  await sheets.spreadsheets.values.append({spreadsheetId:process.env.GOOGLE_SHEET_ID!,range:`${spec.title}!A:H`,valueInputOption:'RAW',insertDataOption:'INSERT_ROWS',requestBody:{values:[paymentLedgerToRow(entry)]}})
+export async function appendPaymentLedger(entry:PaymentLedgerEntry,context?:SheetContext){
+  const sheets=requiredClient(context); const spec=await ensureSheet(sheets,'paymentLedger',context)
+  await sheets.spreadsheets.values.append({spreadsheetId:spreadsheetId(context),range:`${spec.title}!A:H`,valueInputOption:'RAW',insertDataOption:'INSERT_ROWS',requestBody:{values:[paymentLedgerToRow(entry)]}})
 }
-export async function readPaymentLedger(){
-  const sheets=requiredClient(); const spec=await ensureSheet(sheets,'paymentLedger')
-  const result=await sheets.spreadsheets.values.get({spreadsheetId:process.env.GOOGLE_SHEET_ID!,range:`${spec.title}!A:H`})
+export async function readPaymentLedger(context?:SheetContext){
+  const sheets=requiredClient(context); const spec=await ensureSheet(sheets,'paymentLedger',context)
+  const result=await sheets.spreadsheets.values.get({spreadsheetId:spreadsheetId(context),range:`${spec.title}!A:H`})
   return (result.data.values??[]).slice(1).filter(row=>row[0]).map(paymentLedgerFromRow)
 }
 
-export async function appendReturnReason(entry:ReturnReasonEntry){
-  const sheets=requiredClient(); const spec=await ensureSheet(sheets,'returnReasons')
-  await sheets.spreadsheets.values.append({spreadsheetId:process.env.GOOGLE_SHEET_ID!,range:`${spec.title}!A:E`,valueInputOption:'RAW',insertDataOption:'INSERT_ROWS',requestBody:{values:[returnReasonToRow(entry)]}})
+export async function appendReturnReason(entry:ReturnReasonEntry,context?:SheetContext){
+  const sheets=requiredClient(context); const spec=await ensureSheet(sheets,'returnReasons',context)
+  await sheets.spreadsheets.values.append({spreadsheetId:spreadsheetId(context),range:`${spec.title}!A:E`,valueInputOption:'RAW',insertDataOption:'INSERT_ROWS',requestBody:{values:[returnReasonToRow(entry)]}})
 }
-export async function readReturnReasons(){
-  const sheets=requiredClient(); const spec=await ensureSheet(sheets,'returnReasons')
-  const result=await sheets.spreadsheets.values.get({spreadsheetId:process.env.GOOGLE_SHEET_ID!,range:`${spec.title}!A:E`})
+export async function readReturnReasons(context?:SheetContext){
+  const sheets=requiredClient(context); const spec=await ensureSheet(sheets,'returnReasons',context)
+  const result=await sheets.spreadsheets.values.get({spreadsheetId:spreadsheetId(context),range:`${spec.title}!A:E`})
   return (result.data.values??[]).slice(1).filter(row=>row[0]).map(returnReasonFromRow)
 }
 
-export async function readVisits():Promise<VisitEntry[]>{
-  const sheets=requiredClient(); const spec=await ensureSheet(sheets,'visits')
-  const result=await sheets.spreadsheets.values.get({spreadsheetId:process.env.GOOGLE_SHEET_ID!,range:`${spec.title}!A:D`})
+export async function readVisits(context?:SheetContext):Promise<VisitEntry[]>{
+  const sheets=requiredClient(context); const spec=await ensureSheet(sheets,'visits',context)
+  const result=await sheets.spreadsheets.values.get({spreadsheetId:spreadsheetId(context),range:`${spec.title}!A:D`})
   return (result.data.values??[]).slice(1).filter(row=>row[0]).map(visitFromRow)
 }
 
-async function purgePhoneRows(sheets:sheets_v4.Sheets,key:Exclude<SheetKey,'customers'|'rewards'|'paymentRewards'|'earningSettings'>,phone:string){
-  const spec=await ensureSheet(sheets,key)
-  const spreadsheetId=process.env.GOOGLE_SHEET_ID!
+async function purgePhoneRows(sheets:sheets_v4.Sheets,key:Exclude<SheetKey,'customers'|'rewards'|'paymentRewards'|'earningSettings'|'connection'>,phone:string,context?:SheetContext){
+  const spec=await ensureSheet(sheets,key,context)
+  const id=spreadsheetId(context)
   const end=endColumn(spec.headers.length)
-  const result=await sheets.spreadsheets.values.get({spreadsheetId,range:`${spec.title}!A:${end}`})
+  const result=await sheets.spreadsheets.values.get({spreadsheetId:id,range:`${spec.title}!A:${end}`})
   const rows=result.data.values??[]
   const filtered=rows.slice(1).filter(row=>String(row[1]??'')!==phone)
-  await sheets.spreadsheets.values.clear({spreadsheetId,range:`${spec.title}!A2:${end}`})
-  if(filtered.length) await sheets.spreadsheets.values.update({spreadsheetId,range:`${spec.title}!A2:${end}`,valueInputOption:'RAW',requestBody:{values:filtered}})
+  await sheets.spreadsheets.values.clear({spreadsheetId:id,range:`${spec.title}!A2:${end}`})
+  if(filtered.length) await sheets.spreadsheets.values.update({spreadsheetId:id,range:`${spec.title}!A2:${end}`,valueInputOption:'RAW',requestBody:{values:filtered}})
 }
 
-export async function deleteCustomerData(customerId:string){
-  const customers=await readCustomers()
+export async function deleteCustomerData(customerId:string,context?:SheetContext){
+  const customers=await readCustomers(context)
   const found=customers.find(customer=>customer.id===customerId)
   if(!found) throw new Error('CUSTOMER_NOT_FOUND')
-  await replaceCustomers(customers.filter(customer=>customer.id!==customerId))
-  const sheets=requiredClient()
-  await purgePhoneRows(sheets,'visits',found.phone)
-  await purgePhoneRows(sheets,'transactions',found.phone)
-  await purgePhoneRows(sheets,'pointLedger',found.phone)
-  await purgePhoneRows(sheets,'stampLedger',found.phone)
-  await purgePhoneRows(sheets,'paymentLedger',found.phone)
-  await purgePhoneRows(sheets,'returnReasons',found.phone)
+  await replaceCustomers(customers.filter(customer=>customer.id!==customerId),context)
+  const sheets=requiredClient(context)
+  await purgePhoneRows(sheets,'visits',found.phone,context)
+  await purgePhoneRows(sheets,'transactions',found.phone,context)
+  await purgePhoneRows(sheets,'pointLedger',found.phone,context)
+  await purgePhoneRows(sheets,'stampLedger',found.phone,context)
+  await purgePhoneRows(sheets,'paymentLedger',found.phone,context)
+  await purgePhoneRows(sheets,'returnReasons',found.phone,context)
   return {id:customerId}
 }
 
 // Backward-compatible visit log retained for existing sheets and analytics.
-export async function appendVisit(phone:string, source:Source|undefined, points:number){
-  const sheets=requiredClient(); const spec=await ensureSheet(sheets,'visits')
-  await sheets.spreadsheets.values.append({spreadsheetId:process.env.GOOGLE_SHEET_ID!,range:`${spec.title}!A:D`,valueInputOption:'RAW',insertDataOption:'INSERT_ROWS',requestBody:{values:[[new Date().toISOString().slice(0,10),phone,source??'',points]]}})
+export async function appendVisit(phone:string, source:Source|undefined, points:number,context?:SheetContext){
+  const sheets=requiredClient(context); const spec=await ensureSheet(sheets,'visits',context)
+  await sheets.spreadsheets.values.append({spreadsheetId:spreadsheetId(context),range:`${spec.title}!A:D`,valueInputOption:'RAW',insertDataOption:'INSERT_ROWS',requestBody:{values:[[new Date().toISOString().slice(0,10),phone,source??'',points]]}})
+}
+
+export type StoreConnection={storeName:string;connectionCode:string;status:string;appName:string}
+
+export function connectionFromRow(row:unknown[]):StoreConnection{
+  return {storeName:String(row[0]??''),connectionCode:String(row[1]??''),status:String(row[2]??'정상'),appName:String(row[3]??row[0]??'LOOP')}
+}
+
+export function connectionToRow(connection:StoreConnection){
+  return [connection.storeName,connection.connectionCode,connection.status,connection.appName]
+}
+
+export async function readStoreConnection(context?:SheetContext):Promise<StoreConnection|null>{
+  const sheets=requiredClient(context); const spec=await ensureSheet(sheets,'connection',context)
+  const result=await sheets.spreadsheets.values.get({spreadsheetId:spreadsheetId(context),range:`${spec.title}!A:D`})
+  const row=(result.data.values??[])[1]
+  return row?connectionFromRow(row):null
+}
+
+export async function saveStoreConnection(connection:StoreConnection,context?:SheetContext){
+  const sheets=requiredClient(context); const spec=await ensureSheet(sheets,'connection',context)
+  const id=spreadsheetId(context)
+  await sheets.spreadsheets.values.clear({spreadsheetId:id,range:`${spec.title}!A2:D`})
+  await sheets.spreadsheets.values.update({spreadsheetId:id,range:`${spec.title}!A2:D`,valueInputOption:'RAW',requestBody:{values:[connectionToRow(connection)]}})
 }

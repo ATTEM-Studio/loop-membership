@@ -6,6 +6,7 @@ import {buildImportPreview,stableImportHash,validateImportCommit} from '../../..
 import type {DuplicateResolution,NormalizedImportPayload} from '../../../lib/import-types'
 import {isAdminPin} from '../../../lib/member-service'
 import {readCustomers} from '../../../lib/sheets'
+import {getTenantContext} from '../../../lib/tenant-request'
 
 type ImportRequest={
   action?:'preview'|'commit'
@@ -40,9 +41,10 @@ function statusFor(message:string){
 export async function POST(request:Request){
   try{
     const body=await request.json() as ImportRequest
+    const context=getTenantContext(request)
     if(!isAdminPin(body.pin??''))throw new Error('INVALID_PIN')
     if(!body.payload)throw new Error('IMPORT_HAS_BLOCKING_ISSUES')
-    const customers=await readCustomers()
+    const customers=await readCustomers(context)
 
     if((body.action??'preview')==='preview'){
       const preview=buildImportPreview(customers,body.payload)
@@ -52,12 +54,12 @@ export async function POST(request:Request){
     const resolutions=Array.isArray(body.resolutions)?body.resolutions:[]
     validateImportCommit(customers,body.payload,resolutions,body.acknowledged===true)
     const hash=stableImportHash(body.payload,resolutions)
-    if(await hasImportPayloadHash(hash))throw new Error('IMPORT_ALREADY_APPLIED')
+    if(await hasImportPayloadHash(hash,context))throw new Error('IMPORT_ALREADY_APPLIED')
     const importId=(body.importId?.trim()||crypto.randomUUID().slice(0,8)).replace(/[^a-zA-Z0-9_-]/g,'').slice(0,24)||crypto.randomUUID().slice(0,8)
     const plan=planImport(customers,body.payload,resolutions,new Date().toISOString(),importId)
     if(plan.blockingIssues.length)throw new Error('IMPORT_HAS_BLOCKING_ISSUES')
-    const imported=await applyImportPlan(plan,hash,importId)
-    const refreshed=await readCustomers()
+    const imported=await applyImportPlan(plan,hash,importId,context)
+    const refreshed=await readCustomers(context)
     return NextResponse.json({
       importId,
       summary:imported.summary,

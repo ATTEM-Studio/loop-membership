@@ -9,6 +9,7 @@ import {
   readTransactions,
   readVisits,
 } from '../../../lib/sheets'
+import {getTenantContext} from '../../../lib/tenant-request'
 
 function errorStatus(message:string){
   if(message==='GOOGLE_SHEETS_NOT_CONFIGURED') return 503
@@ -19,8 +20,9 @@ function errorStatus(message:string){
 export async function GET(request:Request){
   try{
     if(!isAdminPin(request.headers.get('x-admin-pin')??'')) throw new Error('INVALID_PIN')
+    const context=getTenantContext(request)
     const [customers,visits,transactions,stampLedger,paymentLedger,settings]=await Promise.all([
-      readCustomers(),readVisits(),readTransactions(),readStampLedger(),readPaymentLedger(),readEarningSettings(),
+      readCustomers(context),readVisits(context),readTransactions(context),readStampLedger(context),readPaymentLedger(context),readEarningSettings(context),
     ])
     const analytics=buildAnalytics(customers,visits,transactions,stampLedger,paymentLedger,settings.mode)
     return NextResponse.json({analytics,mode:settings.mode,storage:'google-sheets'})

@@ -30,10 +30,12 @@ npm run dev
 GOOGLE_SERVICE_ACCOUNT_EMAIL=
 GOOGLE_PRIVATE_KEY=
 GOOGLE_SHEET_ID=
+LOOP_AUTH_SECRET=
 LOOP_ADMIN_PIN=9999
 ```
 
 운영 환경에서는 `LOOP_ADMIN_PIN`을 Vercel 환경변수에서 별도로 변경하세요.
+업체별 시트 연결을 사용할 때는 `LOOP_AUTH_SECRET`에 충분히 긴 임의의 비밀 문자열을 추가하세요.
 
 ## Google Sheets 구성
 
@@ -67,6 +69,19 @@ LOOP_ADMIN_PIN=9999
 - `설정_방문포인트혜택` — 방문 포인트 사용 혜택
 - `설정_결제포인트혜택` — 결제 포인트 사용 혜택
 - `설정_적립방식` — 현재 적립 방식, 결제 적립률, 도장 목표, 도장 혜택, 업종, 재방문 설문 문항
+- `설정_매장연결` — 업체명, 매장 연결코드, 사용상태, 앱 표시명
+
+### 업체별 시트 연결
+
+업체마다 자신의 Google Sheets를 하나씩 사용합니다.
+
+1. 업체의 시트를 LOOP 서비스 계정 이메일에 **편집자**로 공유합니다.
+2. 앱이 시트에 처음 접근하면 `설정_매장연결` 탭이 자동으로 생성됩니다.
+3. `설정_매장연결`의 2행에 업체명, 연결코드, `정상`, 앱 표시명을 입력합니다.
+4. Android APK 첫 화면에서 해당 Google Sheets 주소와 연결코드를 한 번 입력합니다.
+5. 연결이 완료되면 기기에 토큰이 저장되어 다음 실행부터 자동으로 연결됩니다.
+
+구글시트 주소 자체는 비밀번호가 아닙니다. 실제 연결은 시트 접근 권한과 `설정_매장연결`의 연결코드가 모두 맞아야 완료됩니다. APK에는 Google 서비스 계정 이메일이나 Private Key를 넣지 않습니다.
 
 앱이 시트에 처음 접근할 때 관리 탭을 **고객 → 포인트 기록 → 설정** 순서로 정리하고, 각 그룹에 서로 다른 탭 색상을 적용합니다. 1행의 컬럼명도 자동으로 한글화되며 2행 이하의 기존 데이터는 유지합니다.
 
@@ -114,5 +129,26 @@ LOOP_ADMIN_PIN=9999
 npm test
 npm run build
 ```
+
+## Android APK
+
+이 저장소에는 Vercel의 LOOP 웹앱을 태블릿 전체 화면으로 표시하는 Capacitor Android 셸이 포함되어 있습니다.
+
+Android SDK와 Java가 설치된 환경에서 다음 명령으로 debug APK를 만들 수 있습니다.
+
+```bash
+npm install
+npm run cap:sync
+cd android
+./gradlew assembleDebug
+```
+
+생성 파일:
+
+```text
+android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+APK는 `https://loop-membership-eight.vercel.app/?loop-connect=1`을 처음 불러옵니다. 이미 연결된 기기는 저장된 토큰을 사용해 연결 화면을 건너뜁니다.
 
 GitHub Actions CI에서도 테스트와 프로덕션 빌드를 실행합니다.
