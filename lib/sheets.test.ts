@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'vitest'
 import {
+  SHEET_LAYOUT,
   balanceLedgerFromRow,
   balanceLedgerToRow,
   customerFromRow,
@@ -16,6 +17,31 @@ import {
   transactionToRow,
 } from './sheets'
 import type {BalanceLedgerEntry, EarningSettings, PaymentLedgerEntry, PointTransaction, ReturnReasonEntry, Reward} from './domain'
+
+describe('managed Google Sheet layout', () => {
+  it('groups customer, point history, and settings tabs with Korean names', () => {
+    expect(SHEET_LAYOUT.map(sheet=>[sheet.key,sheet.title,sheet.legacyTitle,sheet.group])).toEqual([
+      ['customers','고객_목록','Customers','customer'],
+      ['visits','고객_방문기록','Visits','customer'],
+      ['returnReasons','고객_재방문설문','ReturnReasons','customer'],
+      ['transactions','포인트_전체거래내역','Transactions','point'],
+      ['pointLedger','포인트_방문적립내역','PointLedger','point'],
+      ['stampLedger','포인트_도장적립내역','StampLedger','point'],
+      ['paymentLedger','포인트_결제적립내역','PaymentPointLedger','point'],
+      ['rewards','설정_방문포인트혜택','Settings','settings'],
+      ['paymentRewards','설정_결제포인트혜택','PaymentRewards','settings'],
+      ['earningSettings','설정_적립방식','EarningSettings','settings'],
+    ])
+  })
+
+  it('uses Korean column headers for store operators', () => {
+    const byKey=Object.fromEntries(SHEET_LAYOUT.map(sheet=>[sheet.key,sheet.headers]))
+    expect(byKey.customers).toEqual(['고객ID','전화번호','최초유입경로','방문횟수','방문포인트','최근방문일','개인정보동의일시','개인정보동의버전','도장개수','결제포인트'])
+    expect(byKey.visits).toEqual(['날짜','전화번호','최초유입경로','당시방문포인트'])
+    expect(byKey.returnReasons).toEqual(['날짜','전화번호','방문회차','사유ID','재방문사유'])
+    expect(byKey.earningSettings).toEqual(['적립방식','결제적립률','도장목표개수','도장완성혜택','업종','재방문설문설정'])
+  })
+})
 
 describe('customer sheet rows', () => {
   it('reads legacy six-column rows with zero mode-specific balances', () => {
