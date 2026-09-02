@@ -1,4 +1,5 @@
 import {describe, expect, it} from 'vitest'
+import * as sheetModule from './sheets'
 import {
   SHEET_LAYOUT,
   balanceLedgerFromRow,
@@ -40,6 +41,20 @@ describe('managed Google Sheet layout', () => {
     expect(byKey.visits).toEqual(['날짜','전화번호','최초유입경로','당시방문포인트'])
     expect(byKey.returnReasons).toEqual(['날짜','전화번호','방문회차','사유ID','재방문사유'])
     expect(byKey.earningSettings).toEqual(['적립방식','결제적립률','도장목표개수','도장완성혜택','업종','재방문설문설정'])
+  })
+
+  it('keeps an existing dashboard first and starts managed tabs after it', () => {
+    const planner=(sheetModule as unknown as {sheetLayoutIndexes?:Function}).sheetLayoutIndexes
+    expect(planner).toBeTypeOf('function')
+    expect(planner?.([
+      {sheetId:7,title:'고객_목록'},
+      {sheetId:99,title:'대시보드'},
+      {sheetId:8,title:'고객_방문기록'},
+    ])).toEqual([
+      {sheetId:99,index:0},
+      {sheetId:7,index:1},
+      {sheetId:8,index:2},
+    ])
   })
 })
 
