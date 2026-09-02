@@ -178,7 +178,9 @@ export function earningSettingsFromRow(row:unknown[]):EarningSettings{
 
 async function loadSheetProperties(sheets:sheets_v4.Sheets){
   const result=await sheets.spreadsheets.get({spreadsheetId:process.env.GOOGLE_SHEET_ID!,fields:'sheets.properties'})
-  return (result.data.sheets??[]).map(sheet=>sheet.properties).filter((properties):properties is NonNullable<typeof properties>=>Boolean(properties))
+  return (result.data.sheets??[])
+    .map(sheet=>sheet.properties)
+    .filter((properties):properties is sheets_v4.Schema$SheetProperties=>Boolean(properties))
 }
 
 async function prepareWorkbookLayout(sheets:sheets_v4.Sheets){
@@ -202,7 +204,7 @@ async function prepareWorkbookLayout(sheets:sheets_v4.Sheets){
     properties=await loadSheetProperties(sheets)
   }
 
-  const layoutRequests:SHEET_LAYOUT extends readonly unknown[] ? sheets_v4.Schema$Request[] : never=[]
+  const layoutRequests:sheets_v4.Schema$Request[]=[]
   SHEET_LAYOUT.forEach((spec,index)=>{
     const sheet=properties.find(properties=>properties.title===spec.title)
     if(sheet?.sheetId===undefined||sheet.sheetId===null) return
