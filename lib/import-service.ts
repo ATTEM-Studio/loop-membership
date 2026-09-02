@@ -81,7 +81,6 @@ function assertNonNegativeInteger(value:unknown,code:string){
 }
 
 function assertPayload(payload:NormalizedImportPayload){
-  const seenPhones=new Set<string>()
   for(const customer of payload.customers){
     const normalized=normalizePhone(customer.phone)
     if(!/^010\d{8}$/.test(normalized)||normalized!==customer.phone)throw new Error('INVALID_IMPORT_PHONE')
@@ -89,8 +88,6 @@ function assertPayload(payload:NormalizedImportPayload){
     assertNonNegativeInteger(customer.visitPoints,'INVALID_IMPORT_BALANCE')
     assertNonNegativeInteger(customer.stamps,'INVALID_IMPORT_BALANCE')
     assertNonNegativeInteger(customer.paymentPoints,'INVALID_IMPORT_BALANCE')
-    // Same phone may legitimately appear in multiple source sheets/rows, so collisions are merged deliberately.
-    seenPhones.add(customer.phone)
   }
   for(const visit of payload.visits){
     if(!/^010\d{8}$/.test(visit.phone))throw new Error('INVALID_IMPORT_PHONE')
@@ -120,15 +117,28 @@ export function validateImportCommit(currentCustomers:Customer[],payload:Normali
     if(!resolution)throw new Error('DUPLICATE_RESOLUTION_REQUIRED')
     if(resolution.strategy==='manual'){
       for(const field of DUPLICATE_FIELDS){
-        const importedKey=field==='visitPoints'?'visitPoints':field
-        if((row as Record<string,unknown>)[importedKey]!==undefined&&!resolution.fields?.[field])throw new Error('DUPLICATE_RESOLUTION_REQUIRED')
+        if((row as unknown as Record<string,unknown>)[field]!==undefined&&!resolution.fields?.[field])throw new Error('DUPLICATE_RESOLUTION_REQUIRED')
       }
     }
   }
   return {ok:true as const}
 }
 
+function semanticRow(row:Record<string,unknown>){
+  const {sheetName:_sheetName,rowNumber:_rowNumber,...semantic}=row
+  return semantic
+}
+function sortedSemanticRows<T extends {sheetName:string;rowNumber:number}>(rows:T[]){
+  return rows.map(row=>semanticRow(row as unknown as Record<string,unknown>)).sort((a,b)=>JSON.stringify(stable(a)).localeCompare(JSON.stringify(stable(b))))
+}
+
 export function stableImportHash(payload:NormalizedImportPayload,resolutions:DuplicateResolution[]){
-  const canonical=JSON.stringify(stable({payload,resolutions}))
+  const semantic={
+    customers:sortedSemanticRows(payload.customers),
+    visits:sortedSemanticRows(payload.visits),
+    pointHistory:sortedSemanticRows(payload.pointHistory),
+    resolutions:[...resolutions].map(resolution=>stable(resolution)).sort((a,b)=>JSON.stringify(a).localeCompare(JSON.stringify(b))),
+  }
+  const canonical=JSON.stringify(stable(semantic))
   return createHash('sha256').update(canonical).digest('hex')
 }
