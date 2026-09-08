@@ -310,9 +310,9 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .panel-title{margin-bottom:18px;color:var(--loop-text);font-size:15px}
 .pill{background:var(--loop-primary-soft);color:var(--loop-primary-dark);font-size:11px;padding:5px 9px}
 .dash-grid{gap:12px;margin-top:12px}
-.customer-panel{margin-top:12px;padding:0;overflow:hidden}
+.customer-panel{margin-top:12px;padding:0 0 12px;overflow:hidden}
 .customer-panel>.panel-title{padding:20px 22px 0;margin-bottom:10px}
-.customer-row{min-height:66px;padding:13px 22px;border-bottom:1px solid var(--loop-border);transition:background .16s var(--loop-ease)}
+.customer-row{min-height:74px;padding:16px 22px;border-bottom:1px solid var(--loop-border);transition:background .16s var(--loop-ease)}
 .customer-row.interactive:hover{background:rgba(10,132,255,.045)}
 .customer-row.interactive:active{background:rgba(10,132,255,.07)}
 .avatar{background:var(--loop-primary-soft);color:var(--loop-primary-dark)}
@@ -376,7 +376,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   .grid{grid-template-columns:1fr 1fr;gap:9px}
   .stat{padding:16px;border-radius:17px}.stat-value{font-size:26px}
   .panel{padding:18px;border-radius:18px}
-  .customer-row{padding:13px 16px}.customer-panel>.panel-title{padding:18px 16px 0}
+  .customer-row{min-height:70px;padding:15px 16px}.customer-panel>.panel-title{padding:18px 16px 0}
   .customer-detail-modal,.analytics-modal,.mode-warning-modal{width:calc(100vw - 16px)!important;max-width:none!important;max-height:calc(100dvh - 16px)!important;border-radius:22px!important}
 }
 

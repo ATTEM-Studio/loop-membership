@@ -28,4 +28,10 @@ describe('LOOP Native Retail UI style contract',()=>{
     expect(css).toContain('.action-card.redeem')
     expect(css).toContain('background:linear-gradient(155deg,#138dff 0%,#0876e7 100%)')
   })
+
+  it('gives recent customer rows more breathing room',()=>{
+    const css=read('app/native-retail.css')
+    expect(css).toContain('.customer-panel{margin-top:12px;padding:0 0 12px;overflow:hidden}')
+    expect(css).toContain('.customer-row{min-height:74px;padding:16px 22px')
+  })
 })
