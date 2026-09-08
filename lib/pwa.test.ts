@@ -9,9 +9,12 @@ describe('buildLoopManifest',()=>{
     expect(manifest.start_url).toBe('/')
     expect(manifest.scope).toBe('/')
     expect(manifest.display).toBe('standalone')
+    expect(manifest.theme_color).toBe('#F3F5F8')
+    expect(manifest.background_color).toBe('#F3F5F8')
     expect(manifest.icons).toEqual(expect.arrayContaining([
       expect.objectContaining({src:'/pwa-icon/192',sizes:'192x192',type:'image/png'}),
       expect.objectContaining({src:'/pwa-icon/512',sizes:'512x512',type:'image/png'}),
+      expect.objectContaining({src:'/pwa-icon/512?purpose=maskable',purpose:'maskable'}),
     ]))
   })
 })
