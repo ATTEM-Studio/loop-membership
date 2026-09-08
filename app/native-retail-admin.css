@@ -1,0 +1,27 @@
+.mode-selected{background:var(--loop-primary)!important;color:#fff!important;box-shadow:none!important}
+.mode-icon,.survey-index{color:var(--loop-primary-dark)!important;background:var(--loop-primary-soft)!important;border-color:rgba(10,132,255,.1)!important}
+.inline-number b{color:var(--loop-primary-dark)!important}
+.reward-enabled input,.warning-check input{accent-color:var(--loop-primary)!important}
+.config-grid input:focus,.survey-toolbar select:focus,.survey-row input:focus,.inline-number:focus-within{border-color:rgba(10,132,255,.42)!important;box-shadow:0 0 0 3px rgba(10,132,255,.1)!important}
+.config-callout{background:var(--loop-surface-muted)!important}
+.settings-savebar{background:rgba(255,255,255,.86)!important;border-color:var(--loop-border)!important;box-shadow:0 12px 34px rgba(24,31,40,.08)!important;backdrop-filter:blur(18px) saturate(140%)}
+.save-status.success,.analytics-summary strong.positive{color:var(--loop-success)!important}
+.range-tabs{background:rgba(118,128,143,.1)!important}
+.range-tabs button{color:var(--loop-muted)!important}
+.range-tabs button.active{color:var(--loop-text)!important;background:#fff!important}
+.line-chart{color:var(--loop-primary)!important}
+.line-chart-wrap{background:linear-gradient(180deg,#fbfdff,#f7f9fc)!important;border-color:var(--loop-border)!important}
+.warning-icon{background:rgba(255,159,10,.12)!important;color:#a96800!important}
+.mode-warning-modal{border-color:rgba(255,159,10,.18)!important}
+.warning-note{background:rgba(255,159,10,.07)!important;color:var(--loop-text-2)!important}
+.transaction-type.earn{color:var(--loop-success)!important;background:var(--loop-success-soft)!important}
+.transaction-type.redeem{color:var(--loop-primary-dark)!important;background:var(--loop-primary-soft)!important}
+.transaction-type.adjust{color:var(--loop-warning)!important;background:rgba(255,159,10,.1)!important}
+.point-adjust-card{background:var(--loop-surface-muted)!important}
+.adjust-preview.positive{color:var(--loop-success)!important}
+.adjust-preview.negative{color:var(--loop-danger)!important}
+
+@media(max-width:800px){
+  .mode-card{min-height:112px!important}
+  .settings-savebar{bottom:calc(8px + env(safe-area-inset-bottom))!important}
+}
